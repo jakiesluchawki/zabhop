@@ -14,6 +14,8 @@ Final result: **PASSED**
 - Combined source/implementation board: `../qa/redesign/08-combined-comparison.png`
 - Start state: `../qa/redesign/06-after-start.png`
 - Live radar state: `../qa/redesign/05-after-radar-v3.png`
+- Final felt-arrow radar state: `../qa/ios/11-web-radar-felt-arrow.png`
+- Focused native before/after material check: `../qa/ios/12-arrow-comparison.png`
 - Store picker state: `../qa/redesign/07-shop-list.png`
 
 Both the full mobile composition and the focused felt-material regions were reviewed in one combined visual input. The implementation matches the reference's pink field, olive/ivory/violet palette, high-contrast editorial display type, restrained controls, rounded tactile objects and visible felt fibers.
@@ -40,6 +42,17 @@ Fixes applied: full pink/olive/violet redesign, generated felt frog and compass 
 - Interaction: passed; start, five-store picker, close action and route control are present and keyboard-accessible.
 - Data regression: passed; `ul. Dolna 11 lok. U-2, Warszawa` is returned as the closest store in the Dolna test position.
 - Browser console: no warnings or errors in the tested start, radar and store-picker states.
+
+### Final / iteration 2 — compass material pass
+
+- P1: the flat vector arrow looked detached from the tactile compass.
+- P2: the floating circular `N` badge looked like an overlay rather than part of the physical object.
+
+Fixes applied: generated a centered layered felt arrow with a real alpha channel, integrated a stitched plum felt `N` directly into the compass artwork, removed the HTML north-label overlay, and versioned the offline shell cache so the replacement assets propagate to installed PWAs.
+
+- P0 findings: none.
+- P1 findings: none.
+- P2 findings: none.
 
 ## Functional checks
 

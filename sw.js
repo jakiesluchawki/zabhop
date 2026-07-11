@@ -1,15 +1,17 @@
-const CACHE_NAME = "zabhop-shell-v5";
+const CACHE_NAME = "zabhop-shell-v6";
 const SHELL = [
   "./",
   "./index.html",
-  "./styles.css",
+  "./styles.css?v=6",
   "./app.js",
   "./manifest.webmanifest",
   "./icon.png",
   "./felt-frog.png",
-  "./felt-compass.png",
+  "./felt-compass.png?v=6",
+  "./felt-arrow.png?v=6",
   "./stores.json",
-  "./assets/direction-arrow-fill.svg",
+  "./privacy.html",
+  "./support.html",
   "./fonts/Romie-Regular.woff2",
   "./fonts/Roobert-Regular.woff2",
   "./fonts/Roobert-Bold.woff2"
