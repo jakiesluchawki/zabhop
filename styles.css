@@ -48,7 +48,7 @@ body::before {
   position: fixed;
   z-index: 0;
   inset: 0;
-  background-image: url("./felt-background.png?v=8");
+  background-image: url("./felt-background.png?v=9");
   background-position: top center;
   background-size: min(100vw, 460px) auto;
   background-repeat: repeat-y;
@@ -200,7 +200,7 @@ h2 { font-size: 32px; line-height: .95; }
   display: grid;
   place-items: center;
   transform: rotate(0deg);
-  transition: transform .22s cubic-bezier(.2, .7, .2, 1);
+  transition: transform .14s ease-out;
   will-change: transform;
 }
 .needle img { width: 150px; height: 150px; display: block; object-fit: contain; }

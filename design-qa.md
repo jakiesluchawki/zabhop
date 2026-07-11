@@ -70,6 +70,17 @@ Fixes applied: reduced the arrow footprint, regenerated the compass with exactly
 - P1 findings: none.
 - P2 findings: none.
 
+### Final / iteration 4 — compass stability pass
+
+- P0: live iPhone recording showed large alternating arrow turns while distance stayed near 230–250 m.
+- Root cause: the PWA mixed two orientation event streams, animated normalized angles across the `0°/360°` seam, and rebuilt the full store list on every compass sample.
+
+Fixes applied: lock one absolute compass source, use iOS WebKit's single supported event path, reject low-quality and one-off spike samples, smooth headings with timestamp-aware circular math, hold tiny changes inside a `2°` deadband, unwrap visual rotation along the shortest arc, freeze the arrow inside the arrival radius, and update only the needle through one animation frame.
+
+- P0 findings: none after correction.
+- Rotation seam regression: passed for `359° → 1°` and `-179° → 179°`.
+- Noise/spike regression: passed for deadband noise, poor accuracy, one-off spikes, confirmed turns and app-resume reset.
+
 ## Functional checks
 
 - `node --check app.js`
@@ -77,3 +88,4 @@ Fixes applied: reduced the arrow footprint, regenerated the compass with exactly
 - bundled store dataset nearest-distance check around Dolna, Warsaw
 - browser interaction check for exactly one `5 sklepów` button and one `Zamknij` button
 - live DOM check showing five stores with Dolna 11 first
+- `node --test tests/heading-filter.test.cjs` — 6/6 passing

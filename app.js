@@ -1,6 +1,8 @@
 (() => {
   "use strict";
 
+  const { HeadingFilter, unwrapAngle } = window.ZabHopHeading;
+
   const $ = (selector) => document.querySelector(selector);
   const ui = {
     startCard: $("#startCard"),
@@ -40,6 +42,7 @@
 
   const CACHE_KEY = "zabhop-stores-v4";
   const SEARCH_AFTER_MS = 5 * 60 * 1000;
+  const headingFilter = new HeadingFilter();
   let officialStoreRows = null;
   let otherStoreRows = null;
 
@@ -76,8 +79,11 @@
   const state = {
     position: null,
     heading: null,
+    needleRotation: null,
     compassEnabled: false,
     compassRequested: false,
+    orientationSource: null,
+    needleFrame: null,
     stores: [],
     selectedIndex: 0,
     watchId: null,
@@ -149,7 +155,6 @@
   function toRadians(value) { return value * Math.PI / 180; }
   function toDegrees(value) { return value * 180 / Math.PI; }
   function normalizeDegrees(value) { return ((value % 360) + 360) % 360; }
-  function signedAngle(value) { return ((value + 540) % 360) - 180; }
 
   function distanceBetween(a, b) {
     const radius = 6371000;
@@ -402,9 +407,7 @@
     ui.storeAddress.textContent = store.address || "Adres dostępny w Mapach";
     ui.storeNumber.textContent = String(state.selectedIndex + 1).padStart(2, "0");
 
-    const targetBearing = bearingBetween(state.position, store);
-    const deviceHeading = state.heading ?? 0;
-    ui.needle.style.transform = `rotate(${normalizeDegrees(targetBearing - deviceHeading)}deg)`;
+    renderNeedle();
 
     if (store.distance < 35) {
       ui.radarCard.classList.add("arrived");
@@ -425,6 +428,32 @@
     showCard("radarCard");
     setStatus("NA ŻYWO", "ready");
     renderStoreList();
+  }
+
+  function renderNeedle() {
+    const store = state.stores[state.selectedIndex];
+    if (!store || !state.position) return;
+    if (store.distance < 35 && state.needleRotation != null) return;
+
+    const targetBearing = bearingBetween(state.position, store);
+    const deviceHeading = state.heading ?? 0;
+    const targetRotation = normalizeDegrees(targetBearing - deviceHeading);
+    state.needleRotation = unwrapAngle(state.needleRotation, targetRotation);
+    ui.needle.style.transform = `rotate(${state.needleRotation.toFixed(3)}deg)`;
+
+    if (store.distance >= 35) {
+      ui.directionHint.textContent = state.compassEnabled
+        ? "IDŹ W TYM KIERUNKU"
+        : "STRZAŁKA WZGLĘDEM PÓŁNOCY";
+    }
+  }
+
+  function scheduleNeedleRender() {
+    if (state.needleFrame != null) return;
+    state.needleFrame = window.requestAnimationFrame(() => {
+      state.needleFrame = null;
+      renderNeedle();
+    });
   }
 
   function renderStoreList() {
@@ -462,27 +491,41 @@
     });
   }
 
-  function smoothHeading(next) {
-    if (!Number.isFinite(next)) return;
-    if (state.heading == null) state.heading = normalizeDegrees(next);
-    else state.heading = normalizeDegrees(state.heading + signedAngle(next - state.heading) * 0.24);
+  function smoothHeading(next, accuracy) {
+    const filtered = headingFilter.update(next, performance.now() / 1000, accuracy);
+    if (filtered == null) return false;
+    state.heading = filtered;
+    return true;
   }
 
   function handleOrientation(event) {
     let next = null;
+    let accuracy = null;
     if (Number.isFinite(event.webkitCompassHeading)) next = event.webkitCompassHeading;
     else if (event.absolute && Number.isFinite(event.alpha)) next = normalizeDegrees(360 - event.alpha);
     if (next == null) return;
+
+    if (state.orientationSource && state.orientationSource !== event.type) return;
+    if (!state.orientationSource) state.orientationSource = event.type;
+    if (Number.isFinite(event.webkitCompassAccuracy)) accuracy = event.webkitCompassAccuracy;
+
+    if (!smoothHeading(next, accuracy)) return;
     state.compassEnabled = true;
-    smoothHeading(next);
-    if (state.stores.length) renderRadar();
+    if (state.stores.length) scheduleNeedleRender();
   }
 
   function enableOrientationEvents() {
     if (state.compassRequested) return;
     state.compassRequested = true;
-    window.addEventListener("deviceorientationabsolute", handleOrientation, true);
-    window.addEventListener("deviceorientation", handleOrientation, true);
+    state.orientationSource = null;
+    state.heading = null;
+    headingFilter.reset();
+    if (typeof window.DeviceOrientationEvent.requestPermission === "function") {
+      window.addEventListener("deviceorientation", handleOrientation, true);
+    } else {
+      window.addEventListener("deviceorientationabsolute", handleOrientation, true);
+      window.addEventListener("deviceorientation", handleOrientation, true);
+    }
   }
 
   function requestCompassFromGesture() {
@@ -496,9 +539,6 @@
   function handlePosition(position) {
     const coords = position.coords;
     state.position = { lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy };
-    if (!state.compassEnabled && Number.isFinite(coords.heading) && (coords.speed || 0) > 0.6) {
-      smoothHeading(coords.heading);
-    }
     if (state.stores.length) {
       renderRadar();
       void findStores(false);
