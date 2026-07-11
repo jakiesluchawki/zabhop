@@ -1,0 +1,20 @@
+{
+  "name": "ŻabHop — sklep radar",
+  "short_name": "ŻabHop",
+  "description": "Radar prowadzący do najbliższej Żabki.",
+  "lang": "pl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#06110f",
+  "theme_color": "#06110f",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

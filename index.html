@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#06110f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ŻabHop">
+  <meta name="description" content="Radar prowadzący do najbliższej Żabki.">
+  <title>ŻabHop — sklep radar</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icon.png">
+  <link rel="icon" href="./icon.png">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="weather" aria-hidden="true">
+    <div class="cloud cloud-a"></div>
+    <div class="cloud cloud-b"></div>
+    <div class="rain"></div>
+  </div>
+
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" role="img">
+          <path d="M13 28c0-13 8-22 19-22s19 9 19 22v12c0 12-8 19-19 19S13 52 13 40Z" fill="#9bf028"/>
+          <circle cx="21" cy="20" r="9" fill="#f5f0d9"/><circle cx="43" cy="20" r="9" fill="#f5f0d9"/>
+          <circle cx="22" cy="21" r="4" fill="#06110f"/><circle cx="42" cy="21" r="4" fill="#06110f"/>
+          <path d="M23 39c5 4 13 4 18 0" fill="none" stroke="#06110f" stroke-width="4" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="brand-copy">
+        <h1>ŻabHop</h1>
+        <p>SKLEP RADAR</p>
+      </div>
+      <div id="statusPill" class="status-pill"><i></i><span>GOTOWY</span></div>
+    </header>
+
+    <section id="startCard" class="card start-card">
+      <div class="hero-frog" aria-hidden="true">
+        <svg viewBox="0 0 240 190">
+          <path class="frog-shadow" d="M25 157c31-20 160-25 191 0-31 18-159 22-191 0Z"/>
+          <path class="frog-body" d="M56 93c0-51 27-79 64-79s64 28 64 79v26c0 41-26 60-64 60s-64-19-64-60Z"/>
+          <path class="frog-leg" d="M66 116C41 119 22 136 15 158c27 9 55 4 73-16Z"/>
+          <path class="frog-leg" d="M174 116c25 3 44 20 51 42-27 9-55 4-73-16Z"/>
+          <circle class="frog-eye" cx="84" cy="61" r="29"/><circle class="frog-eye" cx="156" cy="61" r="29"/>
+          <circle class="frog-pupil" cx="88" cy="62" r="12"/><circle class="frog-pupil" cx="152" cy="62" r="12"/>
+          <path class="frog-smile" d="M91 116c18 14 40 14 58 0"/>
+        </svg>
+      </div>
+      <div>
+        <p class="eyebrow">BEZ MAPY. PROSTO DO CELU.</p>
+        <h2>Znajdź najbliższą Żabkę</h2>
+        <p class="muted">Jedno kliknięcie uruchomi lokalizację i kompas. Potem idziesz za strzałką.</p>
+      </div>
+      <button id="startButton" class="button button-primary" type="button">
+        <span>ODPAL RADAR</span><b>↗</b>
+      </button>
+      <button id="mapsFallbackStart" class="text-button" type="button">Albo pokaż Żabki w Mapach</button>
+    </section>
+
+    <section id="loadingCard" class="card state-card hidden" aria-live="polite">
+      <div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p class="eyebrow">WĘSZĘ PO OKOLICY</p>
+      <h2 id="loadingTitle">Łapię Twój trop…</h2>
+      <p id="loadingMessage" class="muted">Zezwól Safari na dostęp do lokalizacji.</p>
+    </section>
+
+    <section id="radarCard" class="card radar-card hidden" aria-live="polite">
+      <div class="compass" id="compass">
+        <div class="compass-cloud" aria-hidden="true"></div>
+        <div class="ticks" aria-hidden="true"></div>
+        <div id="needle" class="needle" aria-hidden="true">
+          <div class="arrow-head"></div>
+          <div class="arrow-tail"></div>
+        </div>
+        <div class="frog-dot" aria-hidden="true">
+          <span class="eye left"></span><span class="eye right"></span><i></i>
+        </div>
+      </div>
+
+      <div class="distance-row">
+        <strong id="distance">—</strong>
+        <small id="distanceUnit"></small>
+      </div>
+      <p id="directionHint" class="eyebrow acid">IDŹ ZA ŻABĄ</p>
+
+      <div class="store-copy">
+        <h2 id="storeName">Żabka</h2>
+        <p id="storeAddress" class="muted">Szukam adresu…</p>
+      </div>
+
+      <div class="button-row">
+        <button id="storesButton" class="button button-secondary" type="button">☷ <span>INNA</span></button>
+        <button id="routeButton" class="button button-primary" type="button">TRASA <b>↗</b></button>
+      </div>
+      <button id="refreshButton" class="text-button" type="button">Odśwież sklepy</button>
+    </section>
+
+    <section id="errorCard" class="card state-card hidden" aria-live="assertive">
+      <div class="storm-icon" aria-hidden="true">☁︎</div>
+      <p class="eyebrow">ŻABA ZGUBIŁA TROP</p>
+      <h2 id="errorTitle">Nie udało się znaleźć lokalizacji</h2>
+      <p id="errorMessage" class="muted">Sprawdź uprawnienia Safari i spróbuj ponownie.</p>
+      <button id="retryButton" class="button button-primary" type="button">SPRÓBUJ PONOWNIE</button>
+      <button id="mapsFallbackError" class="text-button" type="button">Otwórz wyszukiwanie w Mapach</button>
+    </section>
+
+    <footer>
+      <p>Dane sklepów: OpenStreetMap · kierunek liczony na urządzeniu</p>
+      <button id="installHintButton" class="install-hint" type="button">＋ Dodaj do ekranu początkowego</button>
+    </footer>
+  </main>
+
+  <div id="sheetBackdrop" class="sheet-backdrop hidden" role="presentation"></div>
+  <section id="storeSheet" class="store-sheet" aria-modal="true" role="dialog" aria-labelledby="sheetTitle" hidden>
+    <div class="sheet-handle" aria-hidden="true"></div>
+    <div class="sheet-header">
+      <div><p class="eyebrow">PIĘĆ NAJBLIŻSZYCH</p><h2 id="sheetTitle">Wybierz Żabkę</h2></div>
+      <button id="closeSheet" class="close-button" type="button" aria-label="Zamknij">×</button>
+    </div>
+    <div id="storeList" class="store-list"></div>
+  </section>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="./app.js" defer></script>
+</body>
+</html>
