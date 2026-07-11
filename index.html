@@ -3,11 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-  <meta name="theme-color" content="#06110f">
+  <meta name="theme-color" content="#ffe1eb">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="ŻabHop">
-  <meta name="description" content="Radar prowadzący do najbliższej Żabki.">
+  <meta name="description" content="Filcowy radar prowadzący do najbliższej Żabki.">
+  <meta property="og:title" content="ŻabHop — najbliższa Żabka">
+  <meta property="og:description" content="Odpal radar i idź za wielką strzałką.">
+  <meta property="og:image" content="https://jakiesluchawki.github.io/zabhop/felt-frog.png">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://jakiesluchawki.github.io/zabhop/">
   <title>ŻabHop — sklep radar</title>
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icon.png">
@@ -15,69 +20,52 @@
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <div class="weather" aria-hidden="true">
-    <div class="cloud cloud-a"></div>
-    <div class="cloud cloud-b"></div>
-    <div class="rain"></div>
-  </div>
-
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 64 64" role="img">
-          <path d="M13 28c0-13 8-22 19-22s19 9 19 22v12c0 12-8 19-19 19S13 52 13 40Z" fill="#9bf028"/>
-          <circle cx="21" cy="20" r="9" fill="#f5f0d9"/><circle cx="43" cy="20" r="9" fill="#f5f0d9"/>
-          <circle cx="22" cy="21" r="4" fill="#06110f"/><circle cx="42" cy="21" r="4" fill="#06110f"/>
-          <path d="M23 39c5 4 13 4 18 0" fill="none" stroke="#06110f" stroke-width="4" stroke-linecap="round"/>
-        </svg>
+      <div class="brand-lockup">
+        <img src="./felt-frog.png" alt="" class="brand-icon">
+        <div>
+          <p class="brand-name">ŻabHop</p>
+          <p class="brand-subtitle">terenowy sklep radar</p>
+        </div>
       </div>
-      <div class="brand-copy">
-        <h1>ŻabHop</h1>
-        <p>SKLEP RADAR</p>
-      </div>
-      <div id="statusPill" class="status-pill"><i></i><span>GOTOWY</span></div>
+      <div id="statusPill" class="status-pill"><span class="status-dot"></span><span class="status-copy">GOTOWY</span></div>
     </header>
 
-    <section id="startCard" class="card start-card">
-      <div class="hero-frog" aria-hidden="true">
-        <svg viewBox="0 0 240 190">
-          <path class="frog-shadow" d="M25 157c31-20 160-25 191 0-31 18-159 22-191 0Z"/>
-          <path class="frog-body" d="M56 93c0-51 27-79 64-79s64 28 64 79v26c0 41-26 60-64 60s-64-19-64-60Z"/>
-          <path class="frog-leg" d="M66 116C41 119 22 136 15 158c27 9 55 4 73-16Z"/>
-          <path class="frog-leg" d="M174 116c25 3 44 20 51 42-27 9-55 4-73-16Z"/>
-          <circle class="frog-eye" cx="84" cy="61" r="29"/><circle class="frog-eye" cx="156" cy="61" r="29"/>
-          <circle class="frog-pupil" cx="88" cy="62" r="12"/><circle class="frog-pupil" cx="152" cy="62" r="12"/>
-          <path class="frog-smile" d="M91 116c18 14 40 14 58 0"/>
-        </svg>
+    <section id="startCard" class="screen start-screen">
+      <figure class="felt-hero">
+        <img src="./felt-frog.png" alt="Filcowa żaba ŻabHop">
+      </figure>
+      <div class="intro-copy">
+        <p class="eyebrow">NAJBLIŻSZA ŻABKA</p>
+        <h1>Hop, po zakupy.</h1>
+        <p class="lead">Jedno kliknięcie. Potem idziesz za naprawdę wielką strzałką.</p>
       </div>
-      <div>
-        <p class="eyebrow">BEZ MAPY. PROSTO DO CELU.</p>
-        <h2>Znajdź najbliższą Żabkę</h2>
-        <p class="muted">Jedno kliknięcie uruchomi lokalizację i kompas. Potem idziesz za strzałką.</p>
-      </div>
-      <button id="startButton" class="button button-primary" type="button">
-        <span>ODPAL RADAR</span><b>↗</b>
-      </button>
-      <button id="mapsFallbackStart" class="text-button" type="button">Albo pokaż Żabki w Mapach</button>
+      <button id="startButton" class="button button-primary" type="button">Znajdź najbliższą</button>
+      <button id="mapsFallbackStart" class="text-button" type="button">Pokaż Żabki w Apple Maps</button>
     </section>
 
-    <section id="loadingCard" class="card state-card hidden" aria-live="polite">
-      <div class="loader" aria-hidden="true"><span></span><span></span><span></span></div>
+    <section id="loadingCard" class="screen state-screen hidden" aria-live="polite">
+      <img src="./felt-frog.png" alt="" class="state-frog">
       <p class="eyebrow">WĘSZĘ PO OKOLICY</p>
       <h2 id="loadingTitle">Łapię Twój trop…</h2>
-      <p id="loadingMessage" class="muted">Zezwól Safari na dostęp do lokalizacji.</p>
+      <p id="loadingMessage" class="support-copy">Zezwól Safari na lokalizację i kompas.</p>
     </section>
 
-    <section id="radarCard" class="card radar-card hidden" aria-live="polite">
-      <div class="compass" id="compass">
-        <div class="compass-cloud" aria-hidden="true"></div>
-        <div class="ticks" aria-hidden="true"></div>
-        <div id="needle" class="needle" aria-hidden="true">
-          <div class="arrow-head"></div>
-          <div class="arrow-tail"></div>
+    <section id="radarCard" class="screen radar-screen hidden" aria-live="polite">
+      <div class="radar-heading">
+        <div>
+          <p class="eyebrow">NAJBLIŻSZA ŻABKA</p>
+          <p id="liveLabel" class="live-label">KIERUNEK NA ŻYWO</p>
         </div>
-        <div class="frog-dot" aria-hidden="true">
-          <span class="eye left"></span><span class="eye right"></span><i></i>
+        <button id="refreshButton" class="small-action" type="button">Odśwież</button>
+      </div>
+
+      <div class="compass-stage" id="compass" aria-label="Kierunek do wybranej Żabki">
+        <img src="./felt-compass.png" alt="" class="compass-plate">
+        <span class="north-label" aria-hidden="true">N</span>
+        <div id="needle" class="needle" aria-hidden="true">
+          <img src="./assets/direction-arrow-fill.svg" alt="">
         </div>
       </div>
 
@@ -85,32 +73,34 @@
         <strong id="distance">—</strong>
         <small id="distanceUnit"></small>
       </div>
-      <p id="directionHint" class="eyebrow acid">IDŹ ZA ŻABĄ</p>
+      <p id="directionHint" class="direction-hint">IDŹ W TYM KIERUNKU</p>
 
-      <div class="store-copy">
-        <h2 id="storeName">Żabka</h2>
-        <p id="storeAddress" class="muted">Szukam adresu…</p>
+      <div class="store-card">
+        <div class="store-number">01</div>
+        <div class="store-copy">
+          <h2 id="storeName">Żabka</h2>
+          <p id="storeAddress">Szukam adresu…</p>
+        </div>
       </div>
 
       <div class="button-row">
-        <button id="storesButton" class="button button-secondary" type="button">☷ <span>INNA</span></button>
-        <button id="routeButton" class="button button-primary" type="button">TRASA <b>↗</b></button>
+        <button id="storesButton" class="button button-secondary" type="button">5 sklepów</button>
+        <button id="routeButton" class="button button-primary" type="button">Trasa pieszo</button>
       </div>
-      <button id="refreshButton" class="text-button" type="button">Odśwież sklepy</button>
     </section>
 
-    <section id="errorCard" class="card state-card hidden" aria-live="assertive">
-      <div class="storm-icon" aria-hidden="true">☁︎</div>
+    <section id="errorCard" class="screen state-screen hidden" aria-live="assertive">
+      <img src="./felt-frog.png" alt="" class="state-frog error-frog">
       <p class="eyebrow">ŻABA ZGUBIŁA TROP</p>
       <h2 id="errorTitle">Nie udało się znaleźć lokalizacji</h2>
-      <p id="errorMessage" class="muted">Sprawdź uprawnienia Safari i spróbuj ponownie.</p>
-      <button id="retryButton" class="button button-primary" type="button">SPRÓBUJ PONOWNIE</button>
+      <p id="errorMessage" class="support-copy">Sprawdź uprawnienia Safari i spróbuj ponownie.</p>
+      <button id="retryButton" class="button button-primary" type="button">Spróbuj ponownie</button>
       <button id="mapsFallbackError" class="text-button" type="button">Otwórz wyszukiwanie w Mapach</button>
     </section>
 
     <footer>
-      <p>Dane sklepów: OpenStreetMap · kierunek liczony na urządzeniu</p>
-      <button id="installHintButton" class="install-hint" type="button">＋ Dodaj do ekranu początkowego</button>
+      <p>Dane lokalizacji: Żabka Polska i OpenStreetMap</p>
+      <button id="installHintButton" class="install-hint" type="button">Dodaj do ekranu początkowego</button>
     </footer>
   </main>
 
@@ -119,13 +109,12 @@
     <div class="sheet-handle" aria-hidden="true"></div>
     <div class="sheet-header">
       <div><p class="eyebrow">PIĘĆ NAJBLIŻSZYCH</p><h2 id="sheetTitle">Wybierz Żabkę</h2></div>
-      <button id="closeSheet" class="close-button" type="button" aria-label="Zamknij">×</button>
+      <button id="closeSheet" class="close-button" type="button">Zamknij</button>
     </div>
     <div id="storeList" class="store-list"></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
   <script src="./app.js" defer></script>
 </body>
 </html>
