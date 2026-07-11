@@ -2,6 +2,7 @@
   "use strict";
 
   const { HeadingFilter, unwrapAngle } = window.ZabHopHeading;
+  const { parseOsmOpeningHours, rankStores, statusAt } = window.ZabHopStoreHours;
 
   const $ = (selector) => document.querySelector(selector);
   const ui = {
@@ -24,6 +25,7 @@
     directionHint: $("#directionHint"),
     storeName: $("#storeName"),
     storeAddress: $("#storeAddress"),
+    storeHours: $("#storeHours"),
     storeNumber: $(".store-number"),
     needle: $("#needle"),
     sheet: $("#storeSheet"),
@@ -35,12 +37,14 @@
     mapsFallbackStart: $("#mapsFallbackStart"),
     mapsFallbackError: $("#mapsFallbackError"),
     modeButtons: [...document.querySelectorAll("[data-store-mode]")],
+    availabilityButtons: [...document.querySelectorAll("[data-availability]")],
     startEyebrow: $("#startEyebrow"),
     radarEyebrow: $("#radarEyebrow"),
-    sheetTitle: $("#sheetTitle")
+    sheetTitle: $("#sheetTitle"),
+    sheetEyebrow: $("#sheetEyebrow")
   };
 
-  const CACHE_KEY = "zabhop-stores-v4";
+  const CACHE_KEY = "zabhop-stores-v5";
   const SEARCH_AFTER_MS = 5 * 60 * 1000;
   const headingFilter = new HeadingFilter();
   let officialStoreRows = null;
@@ -76,6 +80,11 @@
     catch (_) { return "zabka"; }
   }
 
+  function savedAvailability() {
+    try { return localStorage.getItem("zabhop-availability") === "all" ? "all" : "open"; }
+    catch (_) { return "open"; }
+  }
+
   const state = {
     position: null,
     heading: null,
@@ -84,6 +93,7 @@
     compassRequested: false,
     orientationSource: null,
     needleFrame: null,
+    candidates: [],
     stores: [],
     selectedIndex: 0,
     watchId: null,
@@ -91,9 +101,11 @@
     searching: false,
     searchGeneration: 0,
     mode: savedMode(),
+    availability: savedAvailability(),
     lastSearchAt: 0,
     lastSearchPosition: null,
     arrivalNotified: false,
+    openOnlyEmpty: false,
     wakeLock: null
   };
 
@@ -132,9 +144,36 @@
     document.querySelector("#compass")?.setAttribute("aria-label", `Kierunek do wybranego celu: ${copy.defaultName}`);
   }
 
+  function renderAvailability() {
+    ui.availabilityButtons.forEach((button) => {
+      const selected = button.dataset.availability === state.availability;
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+    ui.sheetEyebrow.textContent = state.availability === "open" ? "OTWARTE NAJBLIŻEJ" : "PIĘĆ NAJBLIŻSZYCH";
+  }
+
+  function setAvailability(availability) {
+    if (!["open", "all"].includes(availability) || state.availability === availability) return;
+    state.availability = availability;
+    state.selectedIndex = 0;
+    state.arrivalNotified = false;
+    state.searchGeneration += 1;
+    state.searching = false;
+    try { localStorage.setItem("zabhop-availability", availability); } catch (_) { /* Optional preference. */ }
+    renderAvailability();
+
+    if (state.position && state.candidates.length) {
+      state.stores = dedupeAndSort(state.candidates, state.position, state.mode, state.availability);
+      if (state.stores.length) renderRadar();
+    }
+    if (state.started && state.position) void findStores(true);
+  }
+
   function setStoreMode(mode) {
     if (!modeCopy[mode] || state.mode === mode) return;
     state.mode = mode;
+    state.candidates = [];
     state.stores = [];
     state.selectedIndex = 0;
     state.lastSearchAt = 0;
@@ -191,7 +230,7 @@
     return [first, city].filter((value, index, array) => value && array.indexOf(value) === index).join(", ") || "Adres dostępny w Mapach";
   }
 
-  function dedupeAndSort(stores, position, mode = state.mode) {
+  function dedupeAndSort(stores, position, mode = state.mode, availability = state.availability, date = new Date()) {
     const zabkas = stores.filter((store) => normalizeText(store.name).includes("zabka"));
     const candidates = mode === "zabka"
       ? (zabkas.length ? zabkas : stores)
@@ -202,10 +241,10 @@
       if (unique.some((other) => distanceBetween(store, other) < 20)) continue;
       unique.push(store);
     }
-    return unique
-      .map((store) => ({ ...store, distance: distanceBetween(position, store) }))
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, 5);
+    return rankStores(
+      unique.map((store) => ({ ...store, distance: distanceBetween(position, store) })),
+      { availability, date, limit: 5 }
+    );
   }
 
   async function fetchJSON(url, timeoutMs = 11000) {
@@ -241,7 +280,8 @@
         name: properties.name || properties.brand || modeCopy[mode].defaultName,
         address: buildAddress(properties),
         lat: Number(coordinates[1]),
-        lon: Number(coordinates[0])
+        lon: Number(coordinates[0]),
+        hours: null
       };
     });
   }
@@ -260,7 +300,8 @@
         name: "Żabka",
         address: [row[3], row[4]].filter(Boolean).join(", "),
         lat: Number(row[1]),
-        lon: Number(row[2])
+        lon: Number(row[2]),
+        hours: Array.isArray(row[5]) ? row[5] : null
       }));
   }
 
@@ -278,7 +319,9 @@
         name: store.name || store.chain || "Sklep",
         address: [store.street, store.town].filter(Boolean).join(", ") || "Adres dostępny w Mapach",
         lat: Number(store.lat),
-        lon: Number(store.lon)
+        lon: Number(store.lon),
+        hours: Array.isArray(store.hours) ? store.hours : null,
+        holidaysClosed: store.holidaysClosed === true
       }));
   }
 
@@ -296,6 +339,7 @@
         const data = await fetchJSON(`${endpoint}?data=${encodeURIComponent(query)}`, 9000);
         return (data.elements || []).map((element) => {
           const tags = element.tags || {};
+          const parsedHours = parseOsmOpeningHours(tags.opening_hours);
           return {
             id: `osm-${element.type}-${element.id}`,
             name: tags.name || tags.brand || modeCopy[mode].defaultName,
@@ -305,7 +349,9 @@
               city: tags["addr:city"]
             }),
             lat: Number(element.lat ?? element.center?.lat),
-            lon: Number(element.lon ?? element.center?.lon)
+            lon: Number(element.lon ?? element.center?.lon),
+            hours: parsedHours?.hours || null,
+            holidaysClosed: parsedHours?.holidaysClosed === true
           };
         });
       } catch (error) {
@@ -322,7 +368,7 @@
       const cached = JSON.parse(localStorage.getItem(cacheKey(mode)) || "null");
       if (!cached?.stores?.length || !cached.position || Date.now() - cached.savedAt > 24 * 60 * 60 * 1000) return [];
       if (distanceBetween(position, cached.position) > 8000) return [];
-      return dedupeAndSort(cached.stores, position, mode);
+      return cached.stores;
     } catch (_) {
       return [];
     }
@@ -340,6 +386,7 @@
 
     const generation = ++state.searchGeneration;
     const mode = state.mode;
+    const availability = state.availability;
     const position = { ...state.position };
     const copy = modeCopy[mode];
     state.searching = true;
@@ -351,13 +398,17 @@
     }
 
     const cached = readCachedStores(position, mode);
-    if (!state.stores.length && cached.length) {
-      state.stores = cached;
-      state.selectedIndex = 0;
-      renderRadar();
+    if (!state.candidates.length && cached.length) {
+      state.candidates = cached;
+      const cachedVisible = dedupeAndSort(cached, position, mode, availability);
+      if (!state.stores.length && cachedVisible.length) {
+        state.stores = cachedVisible;
+        state.selectedIndex = 0;
+        renderRadar();
+      }
     }
 
-    let rawStores = [];
+    let combinedStores = [];
     let sorted = [];
     let networkError = null;
     const searches = mode === "zabka"
@@ -366,31 +417,44 @@
 
     for (const search of searches) {
       try {
-        rawStores = await search();
-        sorted = dedupeAndSort(rawStores, position, mode);
+        const found = await search();
+        combinedStores.push(...found);
+        sorted = dedupeAndSort(combinedStores, position, mode, availability);
         if (sorted.length) break;
       } catch (error) {
         networkError = error;
       }
     }
 
-    if (generation !== state.searchGeneration || mode !== state.mode) return;
+    if (generation !== state.searchGeneration || mode !== state.mode || availability !== state.availability) return;
+
+    const resolvedCandidates = combinedStores.length ? combinedStores : cached;
+    if (!sorted.length && !combinedStores.length && cached.length) {
+      sorted = dedupeAndSort(cached, position, mode, availability);
+    }
+    if (resolvedCandidates.length) {
+      state.candidates = resolvedCandidates;
+      saveCachedStores(position, resolvedCandidates, mode);
+    }
 
     if (sorted.length) {
       state.stores = sorted;
       state.selectedIndex = 0;
       state.lastSearchAt = Date.now();
       state.lastSearchPosition = position;
-      saveCachedStores(position, rawStores, mode);
       renderRadar();
+    } else if (availability === "open" && resolvedCandidates.length) {
+      state.stores = [];
+      state.selectedIndex = 0;
+      showNoOpenStore();
     } else if (!networkError) {
       networkError = new Error("empty");
     }
     state.searching = false;
 
-    if (networkError && !state.stores.length) {
+    if (networkError && !state.stores.length && !state.openOnlyEmpty) {
       showError(networkError.message === "empty" ? copy.emptyTitle : "Sklepy schowały się w chmurach", copy.emptyMessage);
-    } else if (networkError) {
+    } else if (networkError && state.stores.length) {
       toast("Pokazuję ostatnio znalezione sklepy");
       setStatus("OFFLINE", "error");
     }
@@ -400,12 +464,18 @@
     const store = state.stores[state.selectedIndex];
     if (!store || !state.position) return;
     store.distance = distanceBetween(state.position, store);
+    store.openingStatus = statusAt(store.hours, { holidaysClosed: store.holidaysClosed });
     const [value, unit] = formatDistance(store.distance);
     ui.distance.textContent = value;
     ui.distanceUnit.textContent = unit;
     ui.storeName.textContent = store.name || modeCopy[state.mode].defaultName;
     ui.storeAddress.textContent = store.address || "Adres dostępny w Mapach";
+    ui.storeHours.textContent = store.openingStatus.label;
+    ui.storeHours.className = `store-hours ${store.openingStatus.state}`;
     ui.storeNumber.textContent = String(state.selectedIndex + 1).padStart(2, "0");
+    ui.storesButton.textContent = storeCountLabel(state.stores.length);
+    state.openOnlyEmpty = false;
+    ui.retryButton.textContent = "Spróbuj ponownie";
 
     renderNeedle();
 
@@ -474,7 +544,11 @@
       name.textContent = store.name || modeCopy[state.mode].defaultName;
       const address = document.createElement("small");
       address.textContent = store.address || "Adres dostępny w Mapach";
-      copy.append(name, address);
+      const openingStatus = store.openingStatus || statusAt(store.hours, { holidaysClosed: store.holidaysClosed });
+      const hours = document.createElement("small");
+      hours.className = `opening-status ${openingStatus.state}`;
+      hours.textContent = openingStatus.label;
+      copy.append(name, address, hours);
 
       const meters = document.createElement("span");
       meters.className = "meters";
@@ -489,6 +563,30 @@
       });
       ui.storeList.append(button);
     });
+  }
+
+  function storeCountLabel(count) {
+    if (count === 1) return "1 sklep";
+    if (count >= 2 && count <= 4) return `${count} sklepy`;
+    return `${count} sklepów`;
+  }
+
+  function refreshAvailabilityResults(announce = false) {
+    if (!state.position || !state.candidates.length) return;
+    const selectedId = state.stores[state.selectedIndex]?.id;
+    const previouslySelected = state.stores[state.selectedIndex];
+    const nextStores = dedupeAndSort(state.candidates, state.position, state.mode, state.availability);
+    if (!nextStores.length) {
+      if (state.availability === "open") showNoOpenStore();
+      return;
+    }
+    state.stores = nextStores;
+    const retainedIndex = nextStores.findIndex((store) => store.id === selectedId);
+    state.selectedIndex = retainedIndex >= 0 ? retainedIndex : 0;
+    if (announce && state.availability === "open" && previouslySelected && retainedIndex < 0) {
+      toast("Ten sklep właśnie się zamknął — kieruję do następnego");
+    }
+    renderRadar();
   }
 
   function smoothHeading(next, accuracy) {
@@ -540,7 +638,7 @@
     const coords = position.coords;
     state.position = { lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy };
     if (state.stores.length) {
-      renderRadar();
+      refreshAvailabilityResults(false);
       void findStores(false);
     } else {
       void findStores(true);
@@ -597,9 +695,22 @@
     });
   }
 
+  function showNoOpenStore() {
+    state.openOnlyEmpty = true;
+    ui.errorTitle.textContent = state.mode === "zabka"
+      ? "Nie znalazłem potwierdzonej otwartej Żabki"
+      : "Nie znalazłem potwierdzonego otwartego sklepu";
+    ui.errorMessage.textContent = "Nie zgaduję godzin. Wybierz „Na później”, żeby zobaczyć najbliższe sklepy bez względu na to, czy są teraz czynne.";
+    ui.retryButton.textContent = "Pokaż na później";
+    showCard("errorCard");
+    setStatus("ZAMKNIĘTE", "error");
+  }
+
   function showError(title, message) {
+    state.openOnlyEmpty = false;
     ui.errorTitle.textContent = title;
     ui.errorMessage.textContent = message;
+    ui.retryButton.textContent = "Spróbuj ponownie";
     showCard("errorCard");
     setStatus("BRAK SYGNAŁU", "error");
   }
@@ -630,7 +741,10 @@
   }
 
   ui.startButton.addEventListener("click", begin);
-  ui.retryButton.addEventListener("click", begin);
+  ui.retryButton.addEventListener("click", () => {
+    if (state.openOnlyEmpty) setAvailability("all");
+    else begin();
+  });
   ui.refreshButton.addEventListener("click", () => void findStores(true));
   ui.routeButton.addEventListener("click", openRoute);
   ui.storesButton.addEventListener("click", openSheet);
@@ -642,11 +756,14 @@
   ui.modeButtons.forEach((button) => {
     button.addEventListener("click", () => setStoreMode(button.dataset.storeMode));
   });
+  ui.availabilityButtons.forEach((button) => {
+    button.addEventListener("click", () => setAvailability(button.dataset.availability));
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && state.started) {
       void requestWakeLock();
-      if (state.stores.length) renderRadar();
+      refreshAvailabilityResults(false);
     }
   });
 
@@ -657,7 +774,10 @@
   const pageParams = new URLSearchParams(window.location.search);
   const requestedMode = pageParams.get("mode");
   if (modeCopy[requestedMode]) state.mode = requestedMode;
+  const requestedAvailability = pageParams.get("availability");
+  if (["open", "all"].includes(requestedAvailability)) state.availability = requestedAvailability;
   renderModeCopy();
+  renderAvailability();
 
   const demoRequested = pageParams.get("demo") === "1";
   if (demoRequested && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
@@ -667,22 +787,27 @@
     state.position = { lat: 52.20225, lon: 21.02925, accuracy: 6 };
     state.stores = state.mode === "zabka"
       ? [
-          { id: "official-ZG162", name: "Żabka", address: "ul. Dolna 11 lok. U-2, Warszawa", lat: 52.200902, lon: 21.0313 },
-          { id: "official-demo-2", name: "Żabka", address: "Wiktorska 7/11, Warszawa", lat: 52.2008698, lon: 21.022411 },
-          { id: "official-demo-3", name: "Żabka", address: "Czerniakowska 145, Warszawa", lat: 52.2122607, lon: 21.0466925 },
-          { id: "official-demo-4", name: "Żabka", address: "Marszałkowska 10/16, Warszawa", lat: 52.2156017, lon: 21.0207027 },
-          { id: "official-demo-5", name: "Żabka", address: "Wielicka 43, Warszawa", lat: 52.187259, lon: 21.0217233 }
+          { id: "official-ZG162", name: "Żabka", address: "ul. Dolna 11 lok. U-2, Warszawa", lat: 52.200902, lon: 21.0313, hours: Array(7).fill("0-1440") },
+          { id: "official-demo-2", name: "Żabka", address: "Wiktorska 7/11, Warszawa", lat: 52.2008698, lon: 21.022411, hours: Array(7).fill("0-1440") },
+          { id: "official-demo-3", name: "Żabka", address: "Czerniakowska 145, Warszawa", lat: 52.2122607, lon: 21.0466925, hours: Array(7).fill("0-1440") },
+          { id: "official-demo-4", name: "Żabka", address: "Marszałkowska 10/16, Warszawa", lat: 52.2156017, lon: 21.0207027, hours: Array(7).fill("0-1440") },
+          { id: "official-demo-5", name: "Żabka", address: "Wielicka 43, Warszawa", lat: 52.187259, lon: 21.0217233, hours: Array(7).fill("0-1440") }
         ]
       : [
-          { id: "other-demo-1", name: "Biedronka", address: "ul. Chełmska 21, Warszawa", lat: 52.20145, lon: 21.0411 },
-          { id: "other-demo-2", name: "Carrefour Express", address: "ul. Puławska 33, Warszawa", lat: 52.2068, lon: 21.0228 },
-          { id: "other-demo-3", name: "Lidl", address: "ul. Sobieskiego 74/78, Warszawa", lat: 52.1936, lon: 21.0363 },
-          { id: "other-demo-4", name: "Stokrotka", address: "ul. Czerniakowska 58, Warszawa", lat: 52.2011, lon: 21.0505 },
-          { id: "other-demo-5", name: "Dino", address: "Warszawa", lat: 52.1852, lon: 21.0181 }
+          { id: "other-demo-1", name: "Biedronka", address: "ul. Chełmska 21, Warszawa", lat: 52.20145, lon: 21.0411, hours: Array(7).fill("0-1440") },
+          { id: "other-demo-2", name: "Carrefour Express", address: "ul. Puławska 33, Warszawa", lat: 52.2068, lon: 21.0228, hours: Array(7).fill("0-1440") },
+          { id: "other-demo-3", name: "Lidl", address: "ul. Sobieskiego 74/78, Warszawa", lat: 52.1936, lon: 21.0363, hours: Array(7).fill("0-1440") },
+          { id: "other-demo-4", name: "Stokrotka", address: "ul. Czerniakowska 58, Warszawa", lat: 52.2011, lon: 21.0505, hours: Array(7).fill("0-1440") },
+          { id: "other-demo-5", name: "Dino", address: "Warszawa", lat: 52.1852, lon: 21.0181, hours: Array(7).fill("0-1440") }
         ];
-    state.stores = dedupeAndSort(state.stores, state.position, state.mode);
+    state.candidates = state.stores;
+    state.stores = dedupeAndSort(state.candidates, state.position, state.mode, state.availability);
     renderRadar();
   }
+
+  window.setInterval(() => {
+    if (state.started && document.visibilityState === "visible") refreshAvailabilityResults(true);
+  }, 60 * 1000);
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js").catch(() => {}));

@@ -1,7 +1,7 @@
 {
   "name": "ŻabHop — sklep radar",
   "short_name": "ŻabHop",
-  "description": "Filcowy radar prowadzący do najbliższej Żabki.",
+  "description": "Filcowy radar prowadzący do najbliższej otwartej Żabki.",
   "lang": "pl",
   "start_url": "./",
   "scope": "./",

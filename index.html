@@ -17,7 +17,7 @@
   <link rel="manifest" href="./manifest.webmanifest?v=4">
   <link rel="apple-touch-icon" href="./icon.png?v=4">
   <link rel="icon" href="./icon.png?v=4">
-  <link rel="stylesheet" href="./styles.css?v=9">
+  <link rel="stylesheet" href="./styles.css?v=10">
 </head>
 <body>
   <main class="app-shell">
@@ -35,6 +35,13 @@
     <nav id="storeModeSwitch" class="store-mode-switch" aria-label="Rodzaj sklepu">
       <button class="store-mode-option selected" data-store-mode="zabka" type="button" aria-pressed="true">Żabka</button>
       <button class="store-mode-option" data-store-mode="other" type="button" aria-pressed="false">Inne sklepy</button>
+    </nav>
+
+    <nav id="availabilitySwitch" class="availability-switch" aria-label="Kiedy robisz zakupy">
+      <button class="availability-option selected" data-availability="open" type="button" aria-pressed="true">
+        <span class="availability-dot" aria-hidden="true"></span>Otwarte teraz
+      </button>
+      <button class="availability-option" data-availability="all" type="button" aria-pressed="false">Na później</button>
     </nav>
 
     <section id="startCard" class="screen start-screen">
@@ -67,9 +74,9 @@
       </div>
 
       <div class="compass-stage" id="compass" aria-label="Kierunek do wybranej Żabki">
-        <img src="./felt-compass.png?v=9" alt="" class="compass-plate">
+        <img src="./felt-compass.png?v=10" alt="" class="compass-plate">
         <div id="needle" class="needle" aria-hidden="true">
-          <img src="./felt-arrow.png?v=9" alt="">
+          <img src="./felt-arrow.png?v=10" alt="">
         </div>
       </div>
 
@@ -84,6 +91,7 @@
         <div class="store-copy">
           <h2 id="storeName">Żabka</h2>
           <p id="storeAddress">Szukam adresu…</p>
+          <p id="storeHours" class="store-hours">Sprawdzam godziny…</p>
         </div>
       </div>
 
@@ -117,14 +125,15 @@
   <section id="storeSheet" class="store-sheet" aria-modal="true" role="dialog" aria-labelledby="sheetTitle" hidden>
     <div class="sheet-handle" aria-hidden="true"></div>
     <div class="sheet-header">
-      <div><p class="eyebrow">PIĘĆ NAJBLIŻSZYCH</p><h2 id="sheetTitle">Wybierz Żabkę</h2></div>
+      <div><p id="sheetEyebrow" class="eyebrow">OTWARTE NAJBLIŻEJ</p><h2 id="sheetTitle">Wybierz Żabkę</h2></div>
       <button id="closeSheet" class="close-button" type="button">Zamknij</button>
     </div>
     <div id="storeList" class="store-list"></div>
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="./heading-filter.js?v=9" defer></script>
-  <script src="./app.js?v=9" defer></script>
+  <script src="./heading-filter.js?v=10" defer></script>
+  <script src="./store-hours.js?v=10" defer></script>
+  <script src="./app.js?v=10" defer></script>
 </body>
 </html>
