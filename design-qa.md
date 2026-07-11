@@ -16,6 +16,9 @@ Final result: **PASSED**
 - Live radar state: `../qa/redesign/05-after-radar-v3.png`
 - Final felt-arrow radar state: `../qa/ios/11-web-radar-felt-arrow.png`
 - Focused native before/after material check: `../qa/ios/12-arrow-comparison.png`
+- Final “Inne sklepy” PWA state: `../qa/ios/21-web-other-final.png`
+- Final proportional/tick comparison: `../qa/ios/20-multistore-comparison.png`
+- PWA/native parity board: `../qa/ios/22-other-cross-platform.png`
 - Store picker state: `../qa/redesign/07-shop-list.png`
 
 Both the full mobile composition and the focused felt-material regions were reviewed in one combined visual input. The implementation matches the reference's pink field, olive/ivory/violet palette, high-contrast editorial display type, restrained controls, rounded tactile objects and visible felt fibers.
@@ -49,6 +52,19 @@ Fixes applied: full pink/olive/violet redesign, generated felt frog and compass 
 - P2: the floating circular `N` badge looked like an overlay rather than part of the physical object.
 
 Fixes applied: generated a centered layered felt arrow with a real alpha channel, integrated a stitched plum felt `N` directly into the compass artwork, removed the HTML north-label overlay, and versioned the offline shell cache so the replacement assets propagate to installed PWAs.
+
+- P0 findings: none.
+- P1 findings: none.
+- P2 findings: none.
+
+### Final / iteration 3 — feedback pass and lightweight store modes
+
+- P1: the felt arrow remained too large relative to the plate.
+- P1: minor tick groups were visually inconsistent.
+- P1: users needed a nearest-other-store option without separate brand tabs.
+- P2: the plain canvas needed a quiet humorous detail.
+
+Fixes applied: reduced the arrow footprint, regenerated the compass with exactly 12 regular hour marks, added one `Żabka / Inne sklepy` switch, bundled 14,617 sanitized OSM points for 12 grocery chains, retained runtime Photon/Overpass fallback, and introduced a low-contrast felt background with tiny peripheral jokes.
 
 - P0 findings: none.
 - P1 findings: none.

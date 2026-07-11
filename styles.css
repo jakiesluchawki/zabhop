@@ -36,7 +36,27 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { min-height: 100%; background: var(--paper); }
-body { min-width: 320px; min-height: 100svh; margin: 0; background: var(--paper); }
+body {
+  position: relative;
+  min-width: 320px;
+  min-height: 100svh;
+  margin: 0;
+  background-color: var(--paper);
+}
+body::before {
+  content: "";
+  position: fixed;
+  z-index: 0;
+  inset: 0;
+  background-image: url("./felt-background.png?v=8");
+  background-position: top center;
+  background-size: min(100vw, 460px) auto;
+  background-repeat: repeat-y;
+  opacity: .48;
+  pointer-events: none;
+}
+.legal-page::before { display: none; }
+body > * { position: relative; z-index: 1; }
 button { font: inherit; color: inherit; }
 button:focus-visible { outline: 3px solid var(--violet); outline-offset: 3px; }
 .hidden { display: none !important; }
@@ -58,6 +78,28 @@ button:focus-visible { outline: 3px solid var(--violet); outline-offset: 3px; }
   padding-bottom: 15px;
   border-bottom: 1px solid var(--soft-line);
 }
+
+.store-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 4px;
+  border: 1px solid rgba(109, 100, 53, .20);
+  border-radius: 13px;
+  background: rgba(255, 247, 241, .72);
+}
+.store-mode-option {
+  height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--olive);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.store-mode-option.selected { color: var(--paper-warm); background: var(--violet); }
 
 .brand-lockup { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .brand-icon { width: 46px; height: 46px; border-radius: 13px; object-fit: cover; border: 1px solid var(--soft-line); }
@@ -161,7 +203,7 @@ h2 { font-size: 32px; line-height: .95; }
   transition: transform .22s cubic-bezier(.2, .7, .2, 1);
   will-change: transform;
 }
-.needle img { width: 220px; height: 220px; display: block; object-fit: contain; }
+.needle img { width: 150px; height: 150px; display: block; object-fit: contain; }
 
 .distance-row { display: flex; justify-content: center; align-items: baseline; gap: 7px; }
 .distance-row strong { font-size: clamp(58px, 17vw, 72px); line-height: .88; letter-spacing: -.055em; font-variant-numeric: tabular-nums; }
@@ -186,6 +228,7 @@ h2 { font-size: 32px; line-height: .95; }
 
 footer { padding: 18px 4px 0; text-align: center; font-size: 10px; }
 footer p { margin: 0 0 9px; opacity: .7; }
+footer p a { color: inherit; text-underline-offset: 3px; }
 .legal-links { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 0 0 10px; }
 .legal-links a, .legal-footer a { color: inherit; text-underline-offset: 3px; }
 .install-hint { border: 1px solid var(--line); border-radius: 999px; padding: 8px 12px; color: var(--olive); background: transparent; font-size: 11px; }

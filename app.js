@@ -31,12 +31,48 @@
     toast: $("#toast"),
     installHintButton: $("#installHintButton"),
     mapsFallbackStart: $("#mapsFallbackStart"),
-    mapsFallbackError: $("#mapsFallbackError")
+    mapsFallbackError: $("#mapsFallbackError"),
+    modeButtons: [...document.querySelectorAll("[data-store-mode]")],
+    startEyebrow: $("#startEyebrow"),
+    radarEyebrow: $("#radarEyebrow"),
+    sheetTitle: $("#sheetTitle")
   };
 
-  const CACHE_KEY = "zabhop-stores-v3";
+  const CACHE_KEY = "zabhop-stores-v4";
   const SEARCH_AFTER_MS = 5 * 60 * 1000;
   let officialStoreRows = null;
+  let otherStoreRows = null;
+
+  const modeCopy = {
+    zabka: {
+      nearest: "NAJBLIŻSZA ŻABKA",
+      picker: "Wybierz Żabkę",
+      searching: "Wypatruję Żabek…",
+      defaultName: "Żabka",
+      startButton: "Znajdź najbliższą",
+      mapsQuery: "Żabka",
+      mapsButton: "Pokaż Żabki w Apple Maps",
+      emptyTitle: "Nie widzę Żabki w pobliżu",
+      emptyMessage: "Połączenie z bazą sklepów nie odpowiedziało. Możesz ponowić albo od razu otworzyć Żabki w Mapach."
+    },
+    other: {
+      nearest: "NAJBLIŻSZY INNY SKLEP",
+      picker: "Wybierz sklep",
+      searching: "Wypatruję innych sklepów…",
+      defaultName: "Sklep",
+      startButton: "Znajdź najbliższy sklep",
+      mapsQuery: "supermarket",
+      mapsButton: "Pokaż sklepy w Apple Maps",
+      emptyTitle: "Inne sklepy się pochowały",
+      emptyMessage: "Nie znalazłem teraz innego sklepu. Możesz ponowić albo otworzyć supermarkety w Mapach."
+    }
+  };
+
+  function savedMode() {
+    try { return localStorage.getItem("zabhop-store-mode") === "other" ? "other" : "zabka"; }
+    catch (_) { return "zabka"; }
+  }
+
   const state = {
     position: null,
     heading: null,
@@ -47,6 +83,8 @@
     watchId: null,
     started: false,
     searching: false,
+    searchGeneration: 0,
+    mode: savedMode(),
     lastSearchAt: 0,
     lastSearchPosition: null,
     arrivalNotified: false,
@@ -71,6 +109,37 @@
     ui.toast.classList.add("show");
     window.clearTimeout(toast.timer);
     toast.timer = window.setTimeout(() => ui.toast.classList.remove("show"), 3200);
+  }
+
+  function renderModeCopy() {
+    const copy = modeCopy[state.mode];
+    ui.modeButtons.forEach((button) => {
+      const selected = button.dataset.storeMode === state.mode;
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+    ui.startEyebrow.textContent = copy.nearest;
+    ui.radarEyebrow.textContent = copy.nearest;
+    ui.sheetTitle.textContent = copy.picker;
+    ui.startButton.textContent = copy.startButton;
+    ui.mapsFallbackStart.textContent = copy.mapsButton;
+    document.querySelector("#compass")?.setAttribute("aria-label", `Kierunek do wybranego celu: ${copy.defaultName}`);
+  }
+
+  function setStoreMode(mode) {
+    if (!modeCopy[mode] || state.mode === mode) return;
+    state.mode = mode;
+    state.stores = [];
+    state.selectedIndex = 0;
+    state.lastSearchAt = 0;
+    state.lastSearchPosition = null;
+    state.arrivalNotified = false;
+    state.searchGeneration += 1;
+    state.searching = false;
+    try { localStorage.setItem("zabhop-store-mode", mode); } catch (_) { /* Optional preference. */ }
+    renderModeCopy();
+
+    if (state.started && state.position) void findStores(true);
   }
 
   function normalizeText(value = "") {
@@ -117,9 +186,11 @@
     return [first, city].filter((value, index, array) => value && array.indexOf(value) === index).join(", ") || "Adres dostępny w Mapach";
   }
 
-  function dedupeAndSort(stores, position) {
-    const exact = stores.filter((store) => normalizeText(store.name).includes("zabka"));
-    const candidates = exact.length ? exact : stores;
+  function dedupeAndSort(stores, position, mode = state.mode) {
+    const zabkas = stores.filter((store) => normalizeText(store.name).includes("zabka"));
+    const candidates = mode === "zabka"
+      ? (zabkas.length ? zabkas : stores)
+      : stores.filter((store) => !normalizeText(store.name).includes("zabka"));
     const unique = [];
     for (const store of candidates) {
       if (!Number.isFinite(store.lat) || !Number.isFinite(store.lon)) continue;
@@ -144,16 +215,16 @@
     }
   }
 
-  async function searchPhoton(position) {
+  async function searchPhoton(position, mode) {
     const lat = position.lat.toFixed(3);
     const lon = position.lon.toFixed(3);
     const params = new URLSearchParams({
-      q: "Żabka",
+      q: modeCopy[mode].mapsQuery,
       lat,
       lon,
-      limit: "30",
+      limit: "50",
       countrycode: "PL",
-      osm_tag: "shop:convenience",
+      osm_tag: mode === "zabka" ? "shop:convenience" : "shop:supermarket",
       location_bias_scale: "0"
     });
     const data = await fetchJSON(`https://photon.komoot.io/api/?${params}`);
@@ -162,7 +233,7 @@
       const coordinates = feature.geometry?.coordinates || [];
       return {
         id: `photon-${properties.osm_type || "x"}-${properties.osm_id || coordinates.join("-")}`,
-        name: properties.name || properties.brand || "Żabka",
+        name: properties.name || properties.brand || modeCopy[mode].defaultName,
         address: buildAddress(properties),
         lat: Number(coordinates[1]),
         lon: Number(coordinates[0])
@@ -188,8 +259,28 @@
       }));
   }
 
-  async function searchOverpass(position) {
-    const query = `[out:json][timeout:10];(nwr(around:12000,${position.lat},${position.lon})["name"~"Żabka|Zabka",i];nwr(around:12000,${position.lat},${position.lon})["brand"~"Żabka|Zabka",i];);out center tags 40;`;
+  async function searchOtherBundled(position) {
+    if (!otherStoreRows) {
+      otherStoreRows = await fetchJSON("./other-stores.json", 15000);
+    }
+
+    const latitudeWindow = 0.24;
+    const longitudeWindow = 0.34;
+    return otherStoreRows
+      .filter((store) => Math.abs(Number(store.lat) - position.lat) < latitudeWindow && Math.abs(Number(store.lon) - position.lon) < longitudeWindow)
+      .map((store) => ({
+        id: `other-${store.id}`,
+        name: store.name || store.chain || "Sklep",
+        address: [store.street, store.town].filter(Boolean).join(", ") || "Adres dostępny w Mapach",
+        lat: Number(store.lat),
+        lon: Number(store.lon)
+      }));
+  }
+
+  async function searchOverpass(position, mode) {
+    const query = mode === "zabka"
+      ? `[out:json][timeout:10];(nwr(around:12000,${position.lat},${position.lon})["name"~"Żabka|Zabka",i];nwr(around:12000,${position.lat},${position.lon})["brand"~"Żabka|Zabka",i];);out center tags 40;`
+      : `[out:json][timeout:10];nwr(around:12000,${position.lat},${position.lon})["shop"~"supermarket|convenience"]["name"];out center tags 80;`;
     const endpoints = [
       "https://overpass.kumi.systems/api/interpreter",
       "https://overpass-api.de/api/interpreter"
@@ -202,7 +293,7 @@
           const tags = element.tags || {};
           return {
             id: `osm-${element.type}-${element.id}`,
-            name: tags.name || tags.brand || "Żabka",
+            name: tags.name || tags.brand || modeCopy[mode].defaultName,
             address: buildAddress({
               street: tags["addr:street"] || tags["addr:place"],
               housenumber: tags["addr:housenumber"],
@@ -219,20 +310,22 @@
     throw lastError || new Error("Overpass unavailable");
   }
 
-  function readCachedStores(position) {
+  function cacheKey(mode) { return `${CACHE_KEY}-${mode}`; }
+
+  function readCachedStores(position, mode) {
     try {
-      const cached = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+      const cached = JSON.parse(localStorage.getItem(cacheKey(mode)) || "null");
       if (!cached?.stores?.length || !cached.position || Date.now() - cached.savedAt > 24 * 60 * 60 * 1000) return [];
       if (distanceBetween(position, cached.position) > 8000) return [];
-      return dedupeAndSort(cached.stores, position);
+      return dedupeAndSort(cached.stores, position, mode);
     } catch (_) {
       return [];
     }
   }
 
-  function saveCachedStores(position, stores) {
+  function saveCachedStores(position, stores, mode) {
     try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), position, stores }));
+      localStorage.setItem(cacheKey(mode), JSON.stringify({ savedAt: Date.now(), position, stores }));
     } catch (_) { /* Private browsing can disable storage. */ }
   }
 
@@ -240,15 +333,19 @@
     if (!state.position || state.searching) return;
     if (!force && state.lastSearchPosition && Date.now() - state.lastSearchAt < SEARCH_AFTER_MS && distanceBetween(state.position, state.lastSearchPosition) < 500) return;
 
+    const generation = ++state.searchGeneration;
+    const mode = state.mode;
+    const position = { ...state.position };
+    const copy = modeCopy[mode];
     state.searching = true;
     setStatus("SZUKAM", "busy");
     if (!state.stores.length) {
       showCard("loadingCard");
-      ui.loadingTitle.textContent = "Wypatruję Żabek…";
+      ui.loadingTitle.textContent = copy.searching;
       ui.loadingMessage.textContent = "Sprawdzam sklepy najbliżej Ciebie.";
     }
 
-    const cached = readCachedStores(state.position);
+    const cached = readCachedStores(position, mode);
     if (!state.stores.length && cached.length) {
       state.stores = cached;
       state.selectedIndex = 0;
@@ -256,36 +353,38 @@
     }
 
     let rawStores = [];
+    let sorted = [];
     let networkError = null;
-    try {
-      rawStores = await searchOfficial(state.position);
-      let sorted = dedupeAndSort(rawStores, state.position);
-      if (!sorted.length) {
-        rawStores = await searchPhoton(state.position);
-        sorted = dedupeAndSort(rawStores, state.position);
+    const searches = mode === "zabka"
+      ? [() => searchOfficial(position), () => searchPhoton(position, mode), () => searchOverpass(position, mode)]
+      : [() => searchOtherBundled(position), () => searchPhoton(position, mode), () => searchOverpass(position, mode)];
+
+    for (const search of searches) {
+      try {
+        rawStores = await search();
+        sorted = dedupeAndSort(rawStores, position, mode);
+        if (sorted.length) break;
+      } catch (error) {
+        networkError = error;
       }
-      if (!sorted.length) {
-        rawStores = await searchOverpass(state.position);
-        sorted = dedupeAndSort(rawStores, state.position);
-      }
-      if (!sorted.length) throw new Error("empty");
+    }
+
+    if (generation !== state.searchGeneration || mode !== state.mode) return;
+
+    if (sorted.length) {
       state.stores = sorted;
       state.selectedIndex = 0;
       state.lastSearchAt = Date.now();
-      state.lastSearchPosition = { ...state.position };
-      saveCachedStores(state.position, rawStores);
+      state.lastSearchPosition = position;
+      saveCachedStores(position, rawStores, mode);
       renderRadar();
-    } catch (error) {
-      networkError = error;
-    } finally {
-      state.searching = false;
+    } else if (!networkError) {
+      networkError = new Error("empty");
     }
+    state.searching = false;
 
     if (networkError && !state.stores.length) {
-      showError(
-        networkError.message === "empty" ? "Nie widzę Żabki w pobliżu" : "Sklepy schowały się w chmurach",
-        "Połączenie z bazą sklepów nie odpowiedziało. Możesz ponowić albo od razu otworzyć Żabki w Mapach."
-      );
+      showError(networkError.message === "empty" ? copy.emptyTitle : "Sklepy schowały się w chmurach", copy.emptyMessage);
     } else if (networkError) {
       toast("Pokazuję ostatnio znalezione sklepy");
       setStatus("OFFLINE", "error");
@@ -299,7 +398,7 @@
     const [value, unit] = formatDistance(store.distance);
     ui.distance.textContent = value;
     ui.distanceUnit.textContent = unit;
-    ui.storeName.textContent = store.name || "Żabka";
+    ui.storeName.textContent = store.name || modeCopy[state.mode].defaultName;
     ui.storeAddress.textContent = store.address || "Adres dostępny w Mapach";
     ui.storeNumber.textContent = String(state.selectedIndex + 1).padStart(2, "0");
 
@@ -312,7 +411,7 @@
       ui.directionHint.textContent = "JESTEŚ NA MIEJSCU!";
       if (!state.arrivalNotified) {
         state.arrivalNotified = true;
-        toast("Hop! Jesteś przy Żabce 🐸");
+        toast(state.mode === "zabka" ? "Hop! Jesteś przy Żabce" : `Hop! Jesteś przy: ${store.name}`);
         if (navigator.vibrate) navigator.vibrate([120, 80, 180]);
       }
     } else {
@@ -343,7 +442,7 @@
 
       const copy = document.createElement("span");
       const name = document.createElement("strong");
-      name.textContent = store.name || "Żabka";
+      name.textContent = store.name || modeCopy[state.mode].defaultName;
       const address = document.createElement("small");
       address.textContent = store.address || "Adres dostępny w Mapach";
       copy.append(name, address);
@@ -467,7 +566,7 @@
 
   function openMapsSearch() {
     const near = state.position ? `&near=${state.position.lat},${state.position.lon}` : "";
-    window.location.href = `https://maps.apple.com/?q=${encodeURIComponent("Żabka")}${near}`;
+    window.location.href = `https://maps.apple.com/?q=${encodeURIComponent(modeCopy[state.mode].mapsQuery)}${near}`;
   }
 
   function openRoute() {
@@ -500,6 +599,9 @@
   ui.mapsFallbackStart.addEventListener("click", openMapsSearch);
   ui.mapsFallbackError.addEventListener("click", openMapsSearch);
   ui.installHintButton.addEventListener("click", () => toast("Safari: Udostępnij, potem Dodaj do ekranu początkowego"));
+  ui.modeButtons.forEach((button) => {
+    button.addEventListener("click", () => setStoreMode(button.dataset.storeMode));
+  });
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && state.started) {
@@ -512,19 +614,33 @@
     ui.installHintButton.classList.add("hidden");
   }
 
-  const demoRequested = new URLSearchParams(window.location.search).get("demo") === "1";
+  const pageParams = new URLSearchParams(window.location.search);
+  const requestedMode = pageParams.get("mode");
+  if (modeCopy[requestedMode]) state.mode = requestedMode;
+  renderModeCopy();
+
+  const demoRequested = pageParams.get("demo") === "1";
   if (demoRequested && ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
     state.started = true;
     state.compassEnabled = true;
     state.heading = 18;
     state.position = { lat: 52.20225, lon: 21.02925, accuracy: 6 };
-    state.stores = [
-      { id: "official-ZG162", name: "Żabka", address: "ul. Dolna 11 lok. U-2, Warszawa", lat: 52.200902, lon: 21.0313 },
-      { id: "official-demo-2", name: "Żabka", address: "Wiktorska 7/11, Warszawa", lat: 52.2008698, lon: 21.022411 },
-      { id: "official-demo-3", name: "Żabka", address: "Czerniakowska 145, Warszawa", lat: 52.2122607, lon: 21.0466925 },
-      { id: "official-demo-4", name: "Żabka", address: "Marszałkowska 10/16, Warszawa", lat: 52.2156017, lon: 21.0207027 },
-      { id: "official-demo-5", name: "Żabka", address: "Wielicka 43, Warszawa", lat: 52.187259, lon: 21.0217233 }
-    ];
+    state.stores = state.mode === "zabka"
+      ? [
+          { id: "official-ZG162", name: "Żabka", address: "ul. Dolna 11 lok. U-2, Warszawa", lat: 52.200902, lon: 21.0313 },
+          { id: "official-demo-2", name: "Żabka", address: "Wiktorska 7/11, Warszawa", lat: 52.2008698, lon: 21.022411 },
+          { id: "official-demo-3", name: "Żabka", address: "Czerniakowska 145, Warszawa", lat: 52.2122607, lon: 21.0466925 },
+          { id: "official-demo-4", name: "Żabka", address: "Marszałkowska 10/16, Warszawa", lat: 52.2156017, lon: 21.0207027 },
+          { id: "official-demo-5", name: "Żabka", address: "Wielicka 43, Warszawa", lat: 52.187259, lon: 21.0217233 }
+        ]
+      : [
+          { id: "other-demo-1", name: "Biedronka", address: "ul. Chełmska 21, Warszawa", lat: 52.20145, lon: 21.0411 },
+          { id: "other-demo-2", name: "Carrefour Express", address: "ul. Puławska 33, Warszawa", lat: 52.2068, lon: 21.0228 },
+          { id: "other-demo-3", name: "Lidl", address: "ul. Sobieskiego 74/78, Warszawa", lat: 52.1936, lon: 21.0363 },
+          { id: "other-demo-4", name: "Stokrotka", address: "ul. Czerniakowska 58, Warszawa", lat: 52.2011, lon: 21.0505 },
+          { id: "other-demo-5", name: "Dino", address: "Warszawa", lat: 52.1852, lon: 21.0181 }
+        ];
+    state.stores = dedupeAndSort(state.stores, state.position, state.mode);
     renderRadar();
   }
 
