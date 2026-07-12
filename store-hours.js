@@ -10,6 +10,9 @@
   const DAY_INDEX = { Mo: 0, Tu: 1, We: 2, Th: 3, Fr: 4, Sa: 5, Su: 6 };
   const WEEKDAY_INDEX = { Mon: 0, Tue: 1, Wed: 2, Thu: 3, Fri: 4, Sat: 5, Sun: 6 };
   const MONTH_TOKENS = /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|week|easter)\b/i;
+  const LIKELY_OPEN_START = 7 * 60;
+  const LIKELY_OPEN_END = 21 * 60;
+  const LIKELY_OPEN_DISTANCE_PENALTY = 350;
 
   function parseClock(value) {
     const match = String(value).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
@@ -251,7 +254,7 @@
 
   function statusAt(hours, options = {}) {
     if (!Array.isArray(hours) || hours.length !== 7) {
-      return { state: "unknown", label: "Brak danych o godzinach", badge: "BRAK GODZIN" };
+      return { state: "unknown", label: "Godziny niepotwierdzone", badge: "NIEPOTWIERDZONE" };
     }
     const date = options.date instanceof Date ? options.date : new Date();
     const timeZone = options.timeZone || "Europe/Warsaw";
@@ -261,9 +264,9 @@
     }
 
     const encoded = hours[parts.weekday];
-    if (encoded == null) return { state: "unknown", label: "Brak danych na dziś", badge: "BRAK GODZIN" };
+    if (encoded == null) return { state: "unknown", label: "Godziny niepotwierdzone", badge: "NIEPOTWIERDZONE" };
     const intervals = decodeIntervals(encoded);
-    if (!intervals) return { state: "unknown", label: "Brak danych o godzinach", badge: "BRAK GODZIN" };
+    if (!intervals) return { state: "unknown", label: "Godziny niepotwierdzone", badge: "NIEPOTWIERDZONE" };
     const current = intervals.find(([start, end]) => parts.minute >= start && parts.minute < end);
     if (current) {
       return {
@@ -277,24 +280,47 @@
     return { state: "closed", label: "Zamknięte teraz", badge: "ZAMKNIĘTE" };
   }
 
+  function availabilityStatusAt(hours, options = {}) {
+    const status = statusAt(hours, options);
+    if (status.state !== "unknown" || options.allowLikelyUnknown !== true) return status;
+
+    const date = options.date instanceof Date ? options.date : new Date();
+    const timeZone = options.timeZone || "Europe/Warsaw";
+    const { year, month, day, minute } = zonedParts(date, timeZone);
+    if (isPolishPublicHoliday(year, month, day)) return status;
+    if (minute < LIKELY_OPEN_START || minute >= LIKELY_OPEN_END) return status;
+
+    return {
+      state: "likely",
+      label: "Prawdopodobnie otwarte · brak godzin",
+      badge: "PRAWDOPODOBNIE OTWARTE"
+    };
+  }
+
   function rankStores(stores, options = {}) {
     const availability = options.availability === "all" ? "all" : "open";
     const limit = Number.isFinite(options.limit) ? options.limit : 5;
     return stores
       .map((store) => ({
         ...store,
-        openingStatus: statusAt(store.hours, {
+        openingStatus: availabilityStatusAt(store.hours, {
           date: options.date,
           timeZone: options.timeZone,
-          holidaysClosed: store.holidaysClosed
+          holidaysClosed: store.holidaysClosed,
+          allowLikelyUnknown: availability === "open" && options.allowLikelyUnknown === true
         })
       }))
-      .filter((store) => availability === "all" || store.openingStatus.state === "open")
-      .sort((a, b) => a.distance - b.distance)
+      .filter((store) => availability === "all" || ["open", "likely"].includes(store.openingStatus.state))
+      .sort((a, b) => {
+        const aScore = a.distance + (a.openingStatus.state === "likely" ? LIKELY_OPEN_DISTANCE_PENALTY : 0);
+        const bScore = b.distance + (b.openingStatus.state === "likely" ? LIKELY_OPEN_DISTANCE_PENALTY : 0);
+        return aScore - bScore || a.distance - b.distance;
+      })
       .slice(0, limit);
   }
 
   return {
+    availabilityStatusAt,
     decodeIntervals,
     isPolishPublicHoliday,
     normalizeOfficialHours,

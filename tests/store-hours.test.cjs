@@ -3,6 +3,7 @@ const test = require("node:test");
 const storesCatalog = require("../stores.json");
 const otherStoresCatalog = require("../other-stores.json");
 const {
+  availabilityStatusAt,
   isPolishPublicHoliday,
   normalizeOfficialHours,
   parseOsmOpeningHours,
@@ -88,9 +89,54 @@ test("evaluates current status in the Warsaw time zone", () => {
 });
 
 test("does not pretend unknown hours are open", () => {
-  assert.equal(statusAt(null).state, "unknown");
+  assert.deepEqual(statusAt(null), {
+    state: "unknown",
+    label: "Godziny niepotwierdzone",
+    badge: "NIEPOTWIERDZONE"
+  });
   const partial = normalizeOfficialHours({ "mon-sat": "06:00:00 - 23:00:00" });
-  assert.equal(statusAt(partial, { date: new Date("2026-07-12T10:00:00Z") }).state, "unknown");
+  assert.deepEqual(statusAt(partial, { date: new Date("2026-07-12T10:00:00Z") }), {
+    state: "unknown",
+    label: "Godziny niepotwierdzone",
+    badge: "NIEPOTWIERDZONE"
+  });
+});
+
+test("marks unknown Żabka hours as likely open only in the conservative daytime window", () => {
+  const beforeMorning = new Date("2026-07-12T04:59:00Z"); // 06:59 in Warsaw
+  const morning = new Date("2026-07-12T05:00:00Z"); // 07:00 in Warsaw
+  const zatorScreenshot = new Date("2026-07-12T07:28:00Z"); // 09:28 in Warsaw
+  const evening = new Date("2026-07-12T19:00:00Z"); // 21:00 in Warsaw
+
+  assert.equal(availabilityStatusAt(null, { date: beforeMorning, allowLikelyUnknown: true }).state, "unknown");
+  assert.equal(availabilityStatusAt(null, { date: morning, allowLikelyUnknown: true }).state, "likely");
+  assert.deepEqual(
+    availabilityStatusAt(null, { date: zatorScreenshot, allowLikelyUnknown: true }),
+    {
+      state: "likely",
+      label: "Prawdopodobnie otwarte · brak godzin",
+      badge: "PRAWDOPODOBNIE OTWARTE"
+    }
+  );
+  assert.equal(availabilityStatusAt(null, { date: evening, allowLikelyUnknown: true }).state, "unknown");
+  assert.equal(availabilityStatusAt(null, { date: zatorScreenshot }).state, "unknown");
+});
+
+test("never upgrades explicitly closed hours to probably open", () => {
+  const closed = Array(7).fill("");
+  const zatorScreenshot = new Date("2026-07-12T07:28:00Z");
+  assert.equal(
+    availabilityStatusAt(closed, { date: zatorScreenshot, allowLikelyUnknown: true }).state,
+    "closed"
+  );
+});
+
+test("never assumes an unknown Żabka is open on a Polish public holiday", () => {
+  const christmasMorning = new Date("2026-12-25T08:00:00Z"); // 09:00 in Warsaw
+  assert.equal(
+    availabilityStatusAt(null, { date: christmasMorning, allowLikelyUnknown: true }).state,
+    "unknown"
+  );
 });
 
 test("recognizes fixed and movable Polish public holidays", () => {
@@ -109,6 +155,41 @@ test("open-now ranking filters before limiting and never treats unknown as open"
   ];
   assert.deepEqual(rankStores(stores, { availability: "open" }).map((store) => store.id), ["open"]);
   assert.deepEqual(rankStores(stores, { availability: "all" }).map((store) => store.id), ["closed-0", "closed-1", "closed-2", "closed-3", "closed-4"]);
+});
+
+test("open-now Żabka ranking prefers a closer probably-open store at the Zator screenshot time", () => {
+  const unknownNear = storesCatalog.find((store) => store[0] === "ZE315");
+  const confirmedFar = storesCatalog.find((store) => store[0] === "Z3298");
+  assert.ok(unknownNear);
+  assert.ok(confirmedFar);
+  const stores = [
+    { id: unknownNear[0], distance: 590, hours: unknownNear[5] },
+    { id: confirmedFar[0], distance: 1200, hours: confirmedFar[5] }
+  ];
+  const date = new Date("2026-07-12T07:28:00Z");
+
+  assert.deepEqual(
+    rankStores(stores, { availability: "open", allowLikelyUnknown: true, date }).map((store) => store.id),
+    ["ZE315", "Z3298"]
+  );
+  assert.equal(
+    rankStores(stores, { availability: "open", allowLikelyUnknown: true, date })[0].openingStatus.state,
+    "likely"
+  );
+});
+
+test("open-now ranking prefers a similarly close confirmed store over an uncertain Żabka", () => {
+  const open = Array(7).fill("420-1260");
+  const date = new Date("2026-07-12T07:28:00Z");
+  const stores = [
+    { id: "unknown-670m", distance: 670, hours: null },
+    { id: "confirmed-900m", distance: 900, hours: open }
+  ];
+
+  assert.deepEqual(
+    rankStores(stores, { availability: "open", allowLikelyUnknown: true, date }).map((store) => store.id),
+    ["confirmed-900m", "unknown-670m"]
+  );
 });
 
 test("bundled Zator stores never turn the official Sunday sentinel into confirmed open", () => {

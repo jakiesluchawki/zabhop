@@ -339,6 +339,7 @@ h2 { font-size: 32px; line-height: .95; }
 .store-copy p { margin: 3px 0 0; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .store-copy .store-hours { margin-top: 4px; color: var(--violet); font-size: 10px; font-weight: 700; }
 .store-hours.closed, .opening-status.closed { color: var(--coral); }
+.store-hours.likely, .opening-status.likely { color: var(--olive); }
 .store-hours.unknown, .opening-status.unknown { color: rgba(109, 100, 53, .68); }
 .button-row { display: grid; grid-template-columns: .9fr 1.1fr; gap: 10px; margin-top: 10px; }
 .arrived .distance-row, .arrived .direction-hint { color: var(--violet); }

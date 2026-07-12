@@ -2,7 +2,7 @@
   "use strict";
 
   const { HeadingFilter, unwrapAngle } = window.ZabHopHeading;
-  const { parseOsmOpeningHours, rankStores, statusAt } = window.ZabHopStoreHours;
+  const { availabilityStatusAt, parseOsmOpeningHours, rankStores } = window.ZabHopStoreHours;
   const { normalizeTheme, themeById, nextTheme } = window.ZabHopTheme;
 
   const $ = (selector) => document.querySelector(selector);
@@ -264,8 +264,21 @@
     }
     return rankStores(
       unique.map((store) => ({ ...store, distance: distanceBetween(position, store) })),
-      { availability, date, limit: 5 }
+      {
+        availability,
+        date,
+        limit: 5,
+        allowLikelyUnknown: mode === "zabka"
+      }
     );
+  }
+
+  function openingStatusFor(store, date = new Date()) {
+    return availabilityStatusAt(store.hours, {
+      date,
+      holidaysClosed: store.holidaysClosed,
+      allowLikelyUnknown: state.mode === "zabka" && state.availability === "open"
+    });
   }
 
   async function fetchJSON(url, timeoutMs = 11000) {
@@ -485,7 +498,7 @@
     const store = state.stores[state.selectedIndex];
     if (!store || !state.position) return;
     store.distance = distanceBetween(state.position, store);
-    store.openingStatus = statusAt(store.hours, { holidaysClosed: store.holidaysClosed });
+    store.openingStatus = openingStatusFor(store);
     const [value, unit] = formatDistance(store.distance);
     ui.distance.textContent = value;
     ui.distanceUnit.textContent = unit;
@@ -565,7 +578,7 @@
       name.textContent = store.name || modeCopy[state.mode].defaultName;
       const address = document.createElement("small");
       address.textContent = store.address || "Adres dostępny w Mapach";
-      const openingStatus = store.openingStatus || statusAt(store.hours, { holidaysClosed: store.holidaysClosed });
+      const openingStatus = openingStatusFor(store);
       const hours = document.createElement("small");
       hours.className = `opening-status ${openingStatus.state}`;
       hours.textContent = openingStatus.label;
