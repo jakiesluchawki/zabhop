@@ -1,0 +1,14 @@
+{
+  "name": "Pogoda Energylandia — Zator",
+  "short_name": "PogodaPark",
+  "description": "Bieżąca ocena sensu wyjazdu do Energylandii na podstawie kilku źródeł pogody.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#ffe1eb",
+  "theme_color": "#ffe1eb",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.jpg", "sizes": "512x512", "type": "image/jpeg" }
+  ]
+}
