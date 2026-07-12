@@ -3,6 +3,7 @@
 
   const { HeadingFilter, unwrapAngle } = window.ZabHopHeading;
   const { parseOsmOpeningHours, rankStores, statusAt } = window.ZabHopStoreHours;
+  const { normalizeTheme, themeById, nextTheme } = window.ZabHopTheme;
 
   const $ = (selector) => document.querySelector(selector);
   const ui = {
@@ -34,6 +35,7 @@
     storeList: $("#storeList"),
     toast: $("#toast"),
     installHintButton: $("#installHintButton"),
+    themeButton: $("#themeButton"),
     mapsFallbackStart: $("#mapsFallbackStart"),
     mapsFallbackError: $("#mapsFallbackError"),
     modeButtons: [...document.querySelectorAll("[data-store-mode]")],
@@ -45,6 +47,7 @@
   };
 
   const CACHE_KEY = "zabhop-stores-v5";
+  const THEME_STORAGE_KEY = "zabhop-theme-v1";
   const SEARCH_AFTER_MS = 5 * 60 * 1000;
   const headingFilter = new HeadingFilter();
   let officialStoreRows = null;
@@ -85,6 +88,11 @@
     catch (_) { return "open"; }
   }
 
+  function savedTheme() {
+    try { return normalizeTheme(localStorage.getItem(THEME_STORAGE_KEY)); }
+    catch (_) { return "rose"; }
+  }
+
   const state = {
     position: null,
     heading: null,
@@ -102,6 +110,7 @@
     searchGeneration: 0,
     mode: savedMode(),
     availability: savedAvailability(),
+    theme: savedTheme(),
     lastSearchAt: 0,
     lastSearchPosition: null,
     arrivalNotified: false,
@@ -127,6 +136,18 @@
     ui.toast.classList.add("show");
     window.clearTimeout(toast.timer);
     toast.timer = window.setTimeout(() => ui.toast.classList.remove("show"), 3200);
+  }
+
+  function applyTheme(themeId, announce = false) {
+    const theme = themeById(themeId);
+    const next = nextTheme(theme.id);
+    state.theme = theme.id;
+    document.documentElement.dataset.theme = theme.id;
+    ui.themeButton.textContent = theme.shortName;
+    ui.themeButton.setAttribute("aria-label", `Motyw: ${theme.name}. Zmień na ${next.name}`);
+    ui.themeButton.title = `Motyw: ${theme.name}`;
+    try { localStorage.setItem(THEME_STORAGE_KEY, theme.id); } catch (_) { /* Optional preference. */ }
+    if (announce) toast(`Motyw: ${theme.name}`);
   }
 
   function renderModeCopy() {
@@ -753,6 +774,7 @@
   ui.mapsFallbackStart.addEventListener("click", openMapsSearch);
   ui.mapsFallbackError.addEventListener("click", openMapsSearch);
   ui.installHintButton.addEventListener("click", () => toast("Safari: Udostępnij, potem Dodaj do ekranu początkowego"));
+  ui.themeButton.addEventListener("click", () => applyTheme(nextTheme(state.theme).id, true));
   ui.modeButtons.forEach((button) => {
     button.addEventListener("click", () => setStoreMode(button.dataset.storeMode));
   });
@@ -776,6 +798,9 @@
   if (modeCopy[requestedMode]) state.mode = requestedMode;
   const requestedAvailability = pageParams.get("availability");
   if (["open", "all"].includes(requestedAvailability)) state.availability = requestedAvailability;
+  const requestedTheme = pageParams.get("theme");
+  if (requestedTheme) state.theme = normalizeTheme(requestedTheme);
+  applyTheme(state.theme);
   renderModeCopy();
   renderAvailability();
 
@@ -787,18 +812,18 @@
     state.position = { lat: 52.20225, lon: 21.02925, accuracy: 6 };
     state.stores = state.mode === "zabka"
       ? [
-          { id: "official-ZG162", name: "Żabka", address: "ul. Dolna 11 lok. U-2, Warszawa", lat: 52.200902, lon: 21.0313, hours: Array(7).fill("0-1440") },
-          { id: "official-demo-2", name: "Żabka", address: "Wiktorska 7/11, Warszawa", lat: 52.2008698, lon: 21.022411, hours: Array(7).fill("0-1440") },
-          { id: "official-demo-3", name: "Żabka", address: "Czerniakowska 145, Warszawa", lat: 52.2122607, lon: 21.0466925, hours: Array(7).fill("0-1440") },
-          { id: "official-demo-4", name: "Żabka", address: "Marszałkowska 10/16, Warszawa", lat: 52.2156017, lon: 21.0207027, hours: Array(7).fill("0-1440") },
-          { id: "official-demo-5", name: "Żabka", address: "Wielicka 43, Warszawa", lat: 52.187259, lon: 21.0217233, hours: Array(7).fill("0-1440") }
+          { id: "official-ZG162", name: "Żabka", address: "ul. Dolna 11 lok. U-2, Warszawa", lat: 52.200902, lon: 21.0313, hours: ["360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "480-1260"] },
+          { id: "official-demo-2", name: "Żabka", address: "Wiktorska 7/11, Warszawa", lat: 52.2008698, lon: 21.022411, hours: ["0-1440", "0-1440", "0-1440", "0-1440", "0-1440", "0-1440", "0-1440"] },
+          { id: "official-demo-3", name: "Żabka", address: "Czerniakowska 145, Warszawa", lat: 52.2122607, lon: 21.0466925, hours: ["420-1320", "420-1320", "420-1320", "420-1320", "420-1380", "420-1380", "540-1200"] },
+          { id: "official-demo-4", name: "Żabka", address: "Marszałkowska 10/16, Warszawa", lat: 52.2156017, lon: 21.0207027, hours: ["360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "420-1380", "480-1320"] },
+          { id: "official-demo-5", name: "Żabka", address: "Wielicka 43, Warszawa", lat: 52.187259, lon: 21.0217233, hours: ["390-1320", "390-1320", "390-1320", "390-1320", "390-1320", "420-1320", null] }
         ]
       : [
-          { id: "other-demo-1", name: "Biedronka", address: "ul. Chełmska 21, Warszawa", lat: 52.20145, lon: 21.0411, hours: Array(7).fill("0-1440") },
-          { id: "other-demo-2", name: "Carrefour Express", address: "ul. Puławska 33, Warszawa", lat: 52.2068, lon: 21.0228, hours: Array(7).fill("0-1440") },
-          { id: "other-demo-3", name: "Lidl", address: "ul. Sobieskiego 74/78, Warszawa", lat: 52.1936, lon: 21.0363, hours: Array(7).fill("0-1440") },
-          { id: "other-demo-4", name: "Stokrotka", address: "ul. Czerniakowska 58, Warszawa", lat: 52.2011, lon: 21.0505, hours: Array(7).fill("0-1440") },
-          { id: "other-demo-5", name: "Dino", address: "Warszawa", lat: 52.1852, lon: 21.0181, hours: Array(7).fill("0-1440") }
+          { id: "other-demo-1", name: "Biedronka", address: "ul. Chełmska 21, Warszawa", lat: 52.20145, lon: 21.0411, hours: ["360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "540-1260"] },
+          { id: "other-demo-2", name: "Carrefour Express", address: "ul. Puławska 33, Warszawa", lat: 52.2068, lon: 21.0228, hours: ["0-1440", "0-1440", "0-1440", "0-1440", "0-1440", "0-1440", "0-1440"] },
+          { id: "other-demo-3", name: "Lidl", address: "ul. Sobieskiego 74/78, Warszawa", lat: 52.1936, lon: 21.0363, hours: ["360-1320", "360-1320", "360-1320", "360-1320", "360-1320", "360-1320", "540-1200"] },
+          { id: "other-demo-4", name: "Stokrotka", address: "ul. Czerniakowska 58, Warszawa", lat: 52.2011, lon: 21.0505, hours: ["420-1260", "420-1260", "420-1260", "420-1260", "420-1260", "420-1260", "600-1080"] },
+          { id: "other-demo-5", name: "Dino", address: "Warszawa", lat: 52.1852, lon: 21.0181, hours: ["360-1320", "360-1320", "360-1320", "360-1320", "360-1320", "390-1260", null] }
         ];
     state.candidates = state.stores;
     state.stores = dedupeAndSort(state.candidates, state.position, state.mode, state.availability);

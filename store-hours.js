@@ -109,8 +109,8 @@
       if (includesHoliday) return null;
 
       const ranges = scheduleText.split(",").map((part) => parseRange(part));
-      // Equal endpoints in OSM are ambiguous (closed vs. all day). Only the
-      // official Żabka feed defines 00:00-00:00 as 24 hours, so stay honest here.
+      // Equal endpoints in OSM are ambiguous (closed vs. all day). Stay
+      // conservative: only the explicit `24/7` form above means all day.
       if (!ranges.length || ranges.some((range) => !range || range[0] === range[1])) return null;
       const selectedDays = [...new Set(dayIndices)];
       // A later rule replaces only the days it explicitly selects. Overnight
@@ -157,8 +157,15 @@
       if (value === false || value == null || value === "") {
         continue;
       }
-      const range = parseRange(value, true);
+      const range = parseRange(value);
       if (!range) return null;
+      // Żabka's locator renders 00:00-00:00 as all day, but the feed uses the
+      // same sentinel for stores whose real Sunday hours are shorter or closed.
+      // An ambiguous sentinel must therefore remain unknown, never confirmed open.
+      if (range[0] === range[1]) {
+        for (const day of indices) days[day] = null;
+        continue;
+      }
       for (const day of indices) {
         days[day].push(range[1] > range[0] ? range : [range[0], 1440]);
       }
@@ -259,10 +266,11 @@
     if (!intervals) return { state: "unknown", label: "Brak danych o godzinach", badge: "BRAK GODZIN" };
     const current = intervals.find(([start, end]) => parts.minute >= start && parts.minute < end);
     if (current) {
-      const allDay = current[0] === 0 && current[1] === 1440;
       return {
         state: "open",
-        label: allDay ? "Otwarte całą dobę" : `Otwarte · do ${formatMinutes(current[1])}`,
+        label: current[0] === 0 && current[1] === 1440
+          ? "Otwarte teraz"
+          : `Otwarte · do ${formatMinutes(current[1])}`,
         badge: "OTWARTE"
       };
     }

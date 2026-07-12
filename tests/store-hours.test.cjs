@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const storesCatalog = require("../stores.json");
+const otherStoresCatalog = require("../other-stores.json");
 const {
   isPolishPublicHoliday,
   normalizeOfficialHours,
@@ -16,11 +18,22 @@ test("normalizes official Żabka weekday and Sunday hours", () => {
   assert.deepEqual(hours, ["360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "540-1320"]);
 });
 
-test("treats the official midnight pair as 24 hours and false as closed", () => {
-  const always = normalizeOfficialHours({ "mon-sun": "00:00:00 - 00:00:00" });
-  assert.deepEqual(always, Array(7).fill("0-1440"));
+test("keeps the unreliable official midnight sentinel unknown and false closed", () => {
+  const ambiguous = normalizeOfficialHours({ "mon-sun": "00:00:00 - 00:00:00" });
+  assert.equal(ambiguous, null);
+  const sundayAmbiguous = normalizeOfficialHours({
+    "mon-sat": "06:00:00 - 23:00:00",
+    sun: "00:00:00 - 00:00:00"
+  });
+  assert.equal(sundayAmbiguous[6], null);
   const sundayClosed = normalizeOfficialHours({ "mon-sat": "06:00:00 - 23:00:00", sun: false });
   assert.equal(sundayClosed[6], "");
+});
+
+test("keeps explicit OSM 24/7 distinct but labels it only as open now", () => {
+  const parsed = parseOsmOpeningHours("24/7");
+  assert.deepEqual(parsed.hours, Array(7).fill("0-1440"));
+  assert.equal(statusAt(parsed.hours, { date: new Date("2026-07-12T00:30:00Z") }).label, "Otwarte teraz");
 });
 
 test("keeps overnight spill together with the next day's own official hours", () => {
@@ -96,4 +109,31 @@ test("open-now ranking filters before limiting and never treats unknown as open"
   ];
   assert.deepEqual(rankStores(stores, { availability: "open" }).map((store) => store.id), ["open"]);
   assert.deepEqual(rankStores(stores, { availability: "all" }).map((store) => store.id), ["closed-0", "closed-1", "closed-2", "closed-3", "closed-4"]);
+});
+
+test("bundled Zator stores never turn the official Sunday sentinel into confirmed open", () => {
+  const screenshotMoment = new Date("2026-07-11T22:25:00Z"); // Sunday 00:25 in Zator.
+  for (const id of ["ZB158", "ZE315"]) {
+    const row = storesCatalog.find((store) => store[0] === id);
+    assert.ok(row, `missing fixture ${id}`);
+    assert.equal(row[5][6], null);
+    assert.equal(statusAt(row[5], { date: screenshotMoment }).state, "unknown");
+  }
+});
+
+test("bundled catalog rejects stale or undated OSM all-day claims from the screenshot", () => {
+  const suspectIds = [
+    "osm-n-2696878132", // stale SPAR, now reported under another brand
+    "osm-w-889502145", // Auchan Easy without a check date
+    "osm-n-12805812035",
+    "osm-n-3368741951",
+    "osm-n-2000515371"
+  ];
+  for (const id of suspectIds) {
+    const store = otherStoresCatalog.find((candidate) => candidate.id === id);
+    assert.ok(store, `missing fixture ${id}`);
+    assert.equal(Object.hasOwn(store, "hours"), false, `${id} must remain unconfirmed`);
+  }
+  const recentlyChecked = otherStoresCatalog.find((store) => store.id === "osm-n-5254419323");
+  assert.deepEqual(recentlyChecked.hours, Array(7).fill("0-1440"));
 });

@@ -1,11 +1,12 @@
-const CACHE_NAME = "zabhop-shell-v10";
+const CACHE_NAME = "zabhop-shell-v11";
 const SHELL = [
   "./",
   "./index.html",
-  "./styles.css?v=10",
-  "./heading-filter.js?v=10",
-  "./store-hours.js?v=10",
-  "./app.js?v=10",
+  "./styles.css?v=11",
+  "./theme.js?v=11",
+  "./heading-filter.js?v=11",
+  "./store-hours.js?v=11",
+  "./app.js?v=11",
   "./manifest.webmanifest",
   "./icon.png",
   "./felt-frog.png",
