@@ -1,91 +1,73 @@
-# Design QA — ŻabHop felt redesign
+# Design QA — PogodaPark / planer Energylandii
 
-Final result: **PASSED**
+## Materiał porównawczy
 
-## Source visual truth
+- Source visual truth (pogoda / barometr): `/Users/mieszkomahboob/.codex/attachments/75bad5d8-688a-4fed-a8d1-348c5c3833da/codex-clipboard-2cddf554-35a8-4098-9a74-41af2c731dbf.png`
+- Source visual truth (plan / spokojna karta papieru): `/Users/mieszkomahboob/.codex/attachments/2633649c-e4e0-4a3d-8b6e-799db6753730/codex-clipboard-d519a368-edaf-4db6-8a7d-bd661e196217.png`
+- Rendered implementation: `/tmp/pogodapark-weather-mobile-qa.jpg`
+- Full-view comparison board: `/tmp/pogodapark-weather-comparison.png`
+- Viewport: 390 × 844 px.
+- State: wejście → „Najpierw sprawdź pogodę”, świeże dane, karta Antistorm widoczna; testowane 2026-07-13.
 
-- Approved CHMURNIK mobile reference: `/tmp/chmurnik-style-full-20260711/design/approved/chmurnik-mobile-density-v1.png`
-- CHMURNIK felt-material reference: `/tmp/chmurnik-style-full-20260711/public/assets/observer-guide-still-life.png`
-- Target viewport: iPhone, 390 × 844 px
-- Intentional product variation: ŻabHop keeps CHMURNIK's tactile felt/paper material language, typography and palette, while replacing the cloud product content with a frog and a navigation compass.
+Comparison board places the supplied weather source and the rendered browser capture side by side at a normalized phone height. The source is a taller 850 × 1652 capture, so the comparison intentionally focuses on the visible weather decision region rather than browser chrome or the lower continuation of the page.
 
-## Comparison evidence
+## Primary interactions checked
 
-- Combined source/implementation board: `../qa/redesign/08-combined-comparison.png`
-- Start state: `../qa/redesign/06-after-start.png`
-- Live radar state: `../qa/redesign/05-after-radar-v3.png`
-- Final felt-arrow radar state: `../qa/ios/11-web-radar-felt-arrow.png`
-- Focused native before/after material check: `../qa/ios/12-arrow-comparison.png`
-- Final “Inne sklepy” PWA state: `../qa/ios/21-web-other-final.png`
-- Final proportional/tick comparison: `../qa/ios/20-multistore-comparison.png`
-- PWA/native parity board: `../qa/ios/22-other-cross-platform.png`
-- Store picker state: `../qa/redesign/07-shop-list.png`
+- Entry choice opens the weather decision view.
+- Weather day switch, score, route CTA and Antistorm safety card remain present above the fold at 390 px.
+- Planner onboarding contains a reversible „Pokazy na żywo” opt-in; generated plan keeps official-show material optional and expands its official description, time, place, photo and source links.
+- Show feed reports source freshness and does not schedule an event when it would consume a core ride, meal or exit buffer.
+- Tested browser console: only Vite / React development informational messages; no application errors or warnings.
 
-Both the full mobile composition and the focused felt-material regions were reviewed in one combined visual input. The implementation matches the reference's pink field, olive/ivory/violet palette, high-contrast editorial display type, restrained controls, rounded tactile objects and visible felt fibers.
+## Findings
 
-## Iteration history
-
-### Audit / iteration 0
-
-- P1: previous dark/neon UI did not match CHMURNIK.
-- P1: previous compass indicator was visually ambiguous and too small.
-- P1: public geocoder omitted the Żabka at Dolna 11.
-- P2: link-preview icon was generic and did not express the product.
-
-Fixes applied: full pink/olive/violet redesign, generated felt frog and compass assets, official Phosphor filled direction arrow at dominant scale, bundled sanitized official store coordinates, and a felt frog icon/preview.
-
-### Final / iteration 1
-
-- P0 findings: none.
-- P1 findings: none.
-- P2 findings: none.
-- Visual hierarchy: passed; arrow, distance and selected store are immediately legible.
-- Style fidelity: passed; typography, palette, materials and spacing read as the same CHMURNIK family.
-- Mobile fit: passed at 390 × 844 px; no horizontal overflow or clipped primary actions.
-- Interaction: passed; start, five-store picker, close action and route control are present and keyboard-accessible.
-- Data regression: passed; `ul. Dolna 11 lok. U-2, Warszawa` is returned as the closest store in the Dolna test position.
-- Browser console: no warnings or errors in the tested start, radar and store-picker states.
-
-### Final / iteration 2 — compass material pass
-
-- P1: the flat vector arrow looked detached from the tactile compass.
-- P2: the floating circular `N` badge looked like an overlay rather than part of the physical object.
-
-Fixes applied: generated a centered layered felt arrow with a real alpha channel, integrated a stitched plum felt `N` directly into the compass artwork, removed the HTML north-label overlay, and versioned the offline shell cache so the replacement assets propagate to installed PWAs.
+### Final visual pass
 
 - P0 findings: none.
 - P1 findings: none.
 - P2 findings: none.
 
-### Final / iteration 3 — feedback pass and lightweight store modes
+### Required fidelity surfaces
 
-- P1: the felt arrow remained too large relative to the plate.
-- P1: minor tick groups were visually inconsistent.
-- P1: users needed a nearest-other-store option without separate brand tabs.
-- P2: the plain canvas needed a quiet humorous detail.
+- Fonts and typography: passed. Romie remains the editorial display face for the verdict; Roobert carries compact controls, source labels and metrics with legible line lengths. No truncation or one-word columns appear in the tested weather region.
+- Spacing and layout rhythm: passed. The weather view now shares the planner’s restrained paper frame, thin olive dividers, rounded hierarchy and mobile padding while keeping the score, meter and direct route action visible without a first scroll.
+- Colors and visual tokens: passed. The intentional move from the older all-pink weather shell to a cream/rose paper surface aligns it with the planner; violet remains reserved for the active day and numerical score, green for the route action and safe status.
+- Image quality and asset fidelity: passed. The supplied felt barometer art remains a real raster asset at the center of the decision screen; its stitched dial, needle and settling animation were not substituted or redrawn in CSS/SVG.
+- Copy and app-specific content: passed. „Pokazy na żywo” is framed as a quiet, voluntary add-on and its user-facing show descriptions, places and times come from Energylandia’s official show pages.
 
-Fixes applied: reduced the arrow footprint, regenerated the compass with exactly 12 regular hour marks, added one `Żabka / Inne sklepy` switch, bundled 14,617 sanitized OSM points for 12 grocery chains, retained runtime Photon/Overpass fallback, and introduced a low-contrast felt background with tiny peripheral jokes.
+## Comparison history
 
+### Iteration 1 — warm-paper unification
+
+- Earlier issue: the older weather shell and the newer planner introduced competing material treatments.
+- Fix applied: moved the weather page into the same warm-paper card hierarchy, token palette, radii, dividers and compact mobile rhythm as the planner; preserved the barometer asset and its pointer behavior.
+- Post-fix evidence: `/tmp/pogodapark-weather-comparison.png` shows the shared paper hierarchy without losing the barometer’s tactile illustration, score hierarchy or information density.
 - P0 findings: none.
 - P1 findings: none.
 - P2 findings: none.
 
-### Final / iteration 4 — compass stability pass
+### Iteration 2 — mobile show/planner regression
 
-- P0: live iPhone recording showed large alternating arrow turns while distance stayed near 230–250 m.
-- Root cause: the PWA mixed two orientation event streams, animated normalized angles across the `0°/360°` seam, and rebuilt the full store list on every compass sample.
+- Earlier issue: a new optional show section could have widened dense timeline rows on very narrow devices.
+- Fix applied: made the show row use the same narrow timeline grid as meals and flexible buffers, kept show material inside a bounded accordion, and compacted the opt-in treatment on short phones.
+- Post-fix evidence: 390 px DOM check reports matching `scrollWidth` and `clientWidth` (390 px); the official-show panel has no horizontal overflow.
+- P0 findings: none.
+- P1 findings: none.
+- P2 findings: none.
 
-Fixes applied: lock one absolute compass source, use iOS WebKit's single supported event path, reject low-quality and one-off spike samples, smooth headings with timestamp-aware circular math, hold tiny changes inside a `2°` deadband, unwrap visual rotation along the shortest arc, freeze the arrow inside the arrival radius, and update only the needle through one animation frame.
+## Open questions
 
-- P0 findings: none after correction.
-- Rotation seam regression: passed for `359° → 1°` and `-179° → 179°`.
-- Noise/spike regression: passed for deadband noise, poor accuracy, one-off spikes, confirmed turns and app-resume reset.
+- None blocking release. Show performance times remain explicitly subject to operator changes; the UI labels the checked time and keeps the official Energylandia link available.
 
-## Functional checks
+## Implementation checklist
 
-- `node --check app.js`
-- `manifest.webmanifest` and `stores.json` JSON parsing
-- bundled store dataset nearest-distance check around Dolna, Warsaw
-- browser interaction check for exactly one `5 sklepów` button and one `Zamknij` button
-- live DOM check showing five stores with Dolna 11 first
-- `node --test tests/heading-filter.test.cjs` — 6/6 passing
+1. Preserve the real felt barometer asset and animation when changing weather layout.
+2. Keep show insertion restricted to an explicit opt-in, a fresh official feed and the final flexible window.
+3. Keep the source timestamp and the official show/map links visible whenever show data is shown.
+4. Re-run this 390 × 844 comparison when a future weather or planner shell changes.
+
+## Follow-up polish
+
+- P3: When live schedule coverage expands beyond the current four-day official range, surface a short availability note before the user chooses a farther future visit date.
+
+final result: passed

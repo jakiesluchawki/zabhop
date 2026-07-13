@@ -42,6 +42,25 @@ function normalizeDateKey(value) {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key ? key : null;
 }
 
+function validOfficialShowUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "energylandia.pl" && url.pathname.startsWith("/show/");
+  } catch {
+    return false;
+  }
+}
+
+function validOfficialParkMapUrl(value) {
+  if (value === null || value === undefined || value === "") return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "energylandia.pl" && url.pathname.startsWith("/mapa-parku/");
+  } catch {
+    return false;
+  }
+}
+
 export function timeToMinutes(value, fallback = 600) {
   const normalized = normalizeTime(value, null);
   if (!normalized) return fallback;
@@ -691,6 +710,7 @@ export function buildUniversalPlan(profile, { attractions = ALL_ATTRACTIONS, que
       pace: profile.pace,
       splitPolicy: profile.splitPolicy,
       preferences: profile.preferences,
+      entertainment: { includeShows: profile?.entertainment?.includeShows === true },
       meal: profile.meal,
       members: members.map((member) => ({ ...member })),
     },
@@ -734,6 +754,7 @@ export function validatePlanSafety(plan) {
     let mealCount = 0;
     let splitCount = 0;
     let flexCount = 0;
+    let showCount = 0;
     for (const step of day.steps ?? []) {
       if (typeof step.id !== "string" || step.id.trim() === "" || seenStepIds.has(step.id)) {
         issues.push(`${day.label}: kroki muszą mieć unikalne, niepuste identyfikatory.`);
@@ -825,6 +846,37 @@ export function validatePlanSafety(plan) {
         if (!step.reunion?.time) issues.push(`${day.label}: podział bez czasu spotkania.`);
       }
       if (step.kind === "meal") mealCount += 1;
+      if (step.kind === "show") {
+        showCount += 1;
+        const performanceStart = Number(step.performanceStartMin);
+        const duration = Number(step.durationMinutes);
+        if (plan?.profile?.entertainment?.includeShows !== true) {
+          issues.push(`${day.label}: pokaz może znaleźć się w planie tylko po wyraźnym wyborze tej opcji.`);
+        }
+        if (
+          typeof step.showId !== "string" || step.showId.trim() === ""
+          || typeof step.title !== "string" || step.title.trim() === ""
+          || typeof step.venue !== "string" || step.venue.trim() === ""
+          || !validOfficialShowUrl(step.officialUrl)
+          || !validOfficialParkMapUrl(step.mapUrl)
+        ) {
+          issues.push(`${day.label}: pokaz nie ma kompletnego, oficjalnego źródła.`);
+        }
+        if (
+          !Number.isInteger(performanceStart)
+          || !Number.isInteger(duration)
+          || duration < 5
+          || duration > 120
+          || performanceStart < step.startMin
+          || performanceStart >= step.endMin
+          || step.endMin !== performanceStart + duration
+        ) {
+          issues.push(`${day.label}: pokaz ma nieprawidłową godzinę lub długość.`);
+        }
+        if (!Number.isFinite(Date.parse(step.sourceCheckedAt || ""))) {
+          issues.push(`${day.label}: pokaz musi ujawniać czas sprawdzenia oficjalnego terminarza.`);
+        }
+      }
       if (step.kind === "flex") {
         flexCount += 1;
         const duration = step.endMin - step.startMin;
@@ -854,13 +906,14 @@ export function validatePlanSafety(plan) {
           issues.push(`${day.label}: bufor ma nieprawidłowe atrakcje zapasowe.`);
         }
       }
-      if (!new Set(["ride", "split", "meal", "flex"]).has(step.kind)) {
+      if (!new Set(["ride", "split", "meal", "show", "flex"]).has(step.kind)) {
         issues.push(`${day.label}: nieznany rodzaj kroku.`);
       }
     }
     if (mealExpected && mealCount !== 1) issues.push(`${day.label}: zaplanowany posiłek musi być jednym twardym blokiem.`);
     if (!mealExpected && mealCount !== 0) issues.push(`${day.label}: plan bez posiłku nie może zawierać bloku obiadu.`);
     if (splitCount > 1) issues.push(`${day.label}: najwyżej jeden podział grupy na dzień.`);
+    if (showCount > 1) issues.push(`${day.label}: najwyżej jeden pokaz może wejść do planu dnia.`);
     if (flexCount > 1) issues.push(`${day.label}: najwyżej jeden kontrolowany bufor na dzień.`);
     const finalStep = day.steps?.at(-1);
     const horizonEnd = finalStep?.kind === "flex"

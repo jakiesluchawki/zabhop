@@ -73,6 +73,8 @@ export function normalizeDraftProfile(input, fallback) {
     : (Array.isArray(fallbackPreferences.interests) ? fallbackPreferences.interests.filter((interest) => INTERESTS.has(interest)) : []);
   const meal = source.meal && typeof source.meal === "object" ? source.meal : {};
   const fallbackMeal = base.meal && typeof base.meal === "object" ? base.meal : {};
+  const entertainment = source.entertainment && typeof source.entertainment === "object" ? source.entertainment : {};
+  const fallbackEntertainment = base.entertainment && typeof base.entertainment === "object" ? base.entertainment : {};
 
   return {
     dayCount: Math.max(1, Math.min(3, Math.round(finiteNumber(source.dayCount, base.dayCount ?? 1)))),
@@ -91,6 +93,9 @@ export function normalizeDraftProfile(input, fallback) {
     meal: {
       mode: MEAL_MODES.has(meal.mode) ? meal.mode : (MEAL_MODES.has(fallbackMeal.mode) ? fallbackMeal.mode : "fast"),
       time: validTime(meal.time, fallbackMeal.time ?? "13:15"),
+    },
+    entertainment: {
+      includeShows: entertainment.includeShows === true || (entertainment.includeShows === undefined && fallbackEntertainment.includeShows === true),
     },
   };
 }
