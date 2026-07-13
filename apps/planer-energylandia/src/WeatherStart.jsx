@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowClockwise,
+  ArrowLeft,
   ArrowRight,
   CaretRight,
   CheckCircle,
@@ -250,7 +251,7 @@ export function RainSafetyCard({ assessment, status = "ready", onRefresh, compac
       <div className="rain-safety-copy">
         <span>TERAZ • ANTISTORM</span>
         <strong>{checking && !assessment ? "Sprawdzam najbliższy opad…" : presentation.title}</strong>
-        {!compact && <p>{presentation.detail}</p>}
+        {(!compact || presentation.tone === "danger") && <p>{presentation.detail}</p>}
         <small>{antistorm?.station || "najbliższy punkt"} • {antistorm?.freshness?.checkedAt ? `sprawdzone ${formatFreshness(antistorm.freshness.checkedAt)}` : "brak świeżego odczytu"} • bufor do auta 30 min</small>
       </div>
       {onRefresh && <button type="button" onClick={onRefresh} disabled={checking} aria-label="Odśwież alert opadowy"><ArrowClockwise className={checking ? "spin" : ""} size={19} weight="bold" /></button>}
@@ -258,7 +259,7 @@ export function RainSafetyCard({ assessment, status = "ready", onRefresh, compac
   );
 }
 
-export function WeatherStart({ weather, assessment, status, onRefresh, onContinue, onResume, damagedLink = false }) {
+export function WeatherStart({ weather, assessment, status, onRefresh, onContinue, onResume, onBack, damagedLink = false }) {
   const [sheet, setSheet] = useState(null);
   const preferredDayIndex = assessment?.visit?.selectedIndices?.[0]
     ?? assessment?.days?.find((day) => Number.isFinite(day.recommendation?.score))?.index
@@ -284,6 +285,7 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
     : "brak";
   const recommendedStart = visit?.selectedDateKeys?.[0] ?? selectedDay?.dateKey ?? null;
   const recommendedCount = visit?.dayCount ?? 1;
+  const rainTone = alertPresentation(assessment?.rainAlert).tone;
   const dayTabs = useMemo(() => [
     { label: "Dzisiaj", day: assessment?.days?.[0] },
     { label: "Jutro", day: assessment?.days?.[1] },
@@ -347,19 +349,20 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
           </button>
         )}
 
-        <RainSafetyCard assessment={assessment} status={status} onRefresh={onRefresh} />
+        {rainTone === "danger" && <RainSafetyCard assessment={assessment} status={status} onRefresh={onRefresh} compact />}
 
         {(status === "error" || status === "stale") && <div className="weather-inline-warning" role="status"><WarningCircle size={21} weight="fill" /><span>{status === "stale" ? "Pokazujemy ostatnią udaną prognozę. Odśwież przed decyzją o zakupie." : "Nie udało się pobrać prognozy. Trasę nadal możesz ułożyć, ale liczby dni nie wybieraj na ślepo."}</span></div>}
-
-        <div className="weather-action-row">
-          <button type="button" onClick={() => setSheet("hours")} disabled={!recommendation?.hours?.length}><Clock size={20} weight="bold" /> Godziny</button>
-          <button type="button" onClick={onRefresh} disabled={refreshing}><ArrowClockwise className={refreshing ? "spin" : ""} size={20} weight="bold" /> {refreshing ? "Sprawdzam" : "Odśwież werdykt"}</button>
-        </div>
 
         <button className="weather-continue" type="button" onClick={() => continueWith()}>
           <span><strong>Ułóż trasę</strong><small>{recommendedCount} {recommendedCount === 1 ? "dzień" : "dni"} od {formatVisitStart(recommendedStart)} — zmienisz to w ankiecie</small></span>
           <ArrowRight size={22} weight="bold" />
         </button>
+        {rainTone !== "danger" && <RainSafetyCard assessment={assessment} status={status} onRefresh={onRefresh} compact />}
+
+        <div className="weather-action-row">
+          <button type="button" onClick={() => setSheet("hours")} disabled={!recommendation?.hours?.length}><Clock size={20} weight="bold" /> Godziny</button>
+          <button type="button" onClick={onRefresh} disabled={refreshing}><ArrowClockwise className={refreshing ? "spin" : ""} size={20} weight="bold" /> {refreshing ? "Sprawdzam" : "Odśwież werdykt"}</button>
+        </div>
         {onResume && <button className="weather-resume" type="button" onClick={onResume}>Wróć do zapisanego planu</button>}
 
         <button className="weather-source-summary" type="button" onClick={() => setSheet("sources")} disabled={!weather?.sources?.length}>
@@ -370,6 +373,7 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
         </button>
 
         <footer className="weather-start-footer"><Info size={15} aria-hidden="true" /><p>Nieoficjalna rekomendacja pogodowa. Zwykły deszcz nie zamyka parku; burze i silny wiatr mogą czasowo wyłączyć atrakcje.</p></footer>
+        {onBack && <button className="weather-change-path" type="button" onClick={onBack}><ArrowLeft size={16} weight="bold" /> Wróć do wyboru startu</button>}
       </div>
 
       {sheet === "sources" && <SourceSheet weather={weather} onClose={() => setSheet(null)} />}
