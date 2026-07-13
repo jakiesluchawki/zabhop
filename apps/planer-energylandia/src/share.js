@@ -385,7 +385,7 @@ export function createEmailDraftUrl(email, planUrl, plan) {
     ...itinerary,
     "",
     `Aplikacja: ${baseUrl.toString()}`,
-    "PDF można zapisać w aplikacji przyciskiem „Drukuj / zapisz PDF” i dołączyć do tej wiadomości.",
+    "Graficzny PDF można przygotować w aplikacji przyciskiem „Przygotuj piękny PDF” i dołączyć do tej wiadomości.",
     "",
     "Ograniczenia przy wejściu i decyzja obsługi parku zawsze mają pierwszeństwo.",
   ].filter(Boolean).join("\n");

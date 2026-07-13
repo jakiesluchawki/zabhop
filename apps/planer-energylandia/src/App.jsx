@@ -60,6 +60,7 @@ import {
 import { loadAntistormNowcast, loadWeather, formatPolishDay } from "./weather.js";
 import { assessThreeDayWeather } from "./weatherPlan.js";
 import { RainSafetyCard, WeatherStart } from "./WeatherStart.jsx";
+import { EntryStart } from "./EntryStart.jsx";
 
 const DRAFT_KEY = "energylandia-planner-v1:draft";
 const PLAN_KEY = "energylandia-planner-v1:plan";
@@ -288,7 +289,7 @@ function WizardIllustration({ step }) {
   );
 }
 
-function Welcome({ onStart, onBack, onResume }) {
+function Welcome({ onStart, onBack, onResume, backLabel = "Wróć do początku" }) {
   const headingRef = useRef(null);
 
   useLayoutEffect(() => {
@@ -300,7 +301,7 @@ function Welcome({ onStart, onBack, onResume }) {
       <article className="welcome-material">
         <header>
           <strong>PLAN DLA WAS</strong>
-          <button className="welcome-weather-link" type="button" onClick={onBack}><ArrowLeft size={15} weight="bold" /> Wróć do pogody</button>
+          <button className="welcome-weather-link" type="button" onClick={onBack}><ArrowLeft size={15} weight="bold" /> {backLabel}</button>
         </header>
         <section>
           <p className="eyebrow">NIE KOLEJNY KATALOG ATRAKCJI</p>
@@ -655,24 +656,104 @@ function planMapItems(day) {
   });
 }
 
-function PrintablePlan({ plan, planUrl }) {
+const PRINT_DAY_ART = ["07-podsumowanie.jpg", "04-apetyt.jpg", "01-czas.jpg"];
+
+function PrintablePlan({ plan, planUrl, preview = false }) {
   if (!plan) return null;
+  const generatedLabel = new Date(plan.generatedAt).toLocaleString("pl-PL", { dateStyle: "long", timeStyle: "short" });
+  const visitDates = plan.days.map((_, index) => planDayDateLabel(plan, index, false)).filter(Boolean);
+  const visitHours = plan.days[0]?.stats ? `${plan.days[0].stats.start}–${plan.days[0].stats.end}` : `${plan.profile.arrivalTime}–${plan.profile.departureTime}`;
   return (
-    <article className="print-plan">
-      <header><p>PLAN DLA WAS • ENERGYLANDIA</p><h1>{plan.days.length} {plan.days.length === 1 ? "dzień" : "dni"} bez biegania w kółko</h1><span>Wygenerowano {new Date(plan.generatedAt).toLocaleString("pl-PL")}</span></header>
-      <section className="print-party"><h2>Skład</h2><p>{plan.profile.members.map((member) => `${memberLabel(member)} — ${member.age} lat, ${member.height} cm`).join(" • ")}</p></section>
+    <article className={`print-plan ${preview ? "is-preview" : ""}`} aria-label="Podgląd dokumentu PDF">
+      <section className="pdf-page pdf-cover-page">
+        <header className="pdf-brandline">
+          <span className="pdf-brand"><img src={`${import.meta.env.BASE_URL}icon-192-v3.png`} alt="" /><span><strong>PogodaPark</strong><small>ENERGYLANDIA • PLAN DLA WAS</small></span></span>
+          <span className="pdf-edition">WASZA TRASA • {plan.days.length} {plan.days.length === 1 ? "DZIEŃ" : "DNI"}</span>
+        </header>
+
+        <div className="pdf-cover-copy">
+          <p>NIE KATALOG ATRAKCJI. PLAN, KTÓRY PILNUJE CAŁEJ GRUPY.</p>
+          <h1>Wasza Energylandia.<br /><i>Dobrze ułożona.</i></h1>
+          <span>{visitDates.length ? visitDates.join(" • ") : "Wybrany termin"} · {visitHours}</span>
+        </div>
+
+        <figure className="pdf-cover-hero">
+          <img src={`${import.meta.env.BASE_URL}assets/welcome-plan-v1.jpg`} alt="Filcowa mapa zaplanowanego dnia" />
+          <figcaption>SKŁAD • OGRANICZENIA • POGODA • OBIAD • META</figcaption>
+        </figure>
+
+        <div className="pdf-fact-grid">
+          <div><small>DNI</small><strong>{plan.days.length}</strong><span>{visitDates[0] || "termin w planie"}</span></div>
+          <div><small>GRUPA</small><strong>{plan.profile.members.length}</strong><span>{plan.profile.members.filter((member) => member.role === "adult").length} dorosłych</span></div>
+          <div><small>GODZINY</small><strong>{visitHours}</strong><span>pełny zadeklarowany dzień</span></div>
+        </div>
+
+        <div className="pdf-party-panel">
+          <figure><img src={`${import.meta.env.BASE_URL}assets/onboarding/02-sklad.jpg`} alt="Filcowa grupa uczestników" /></figure>
+          <section><p className="pdf-kicker">SKŁAD I OGRANICZENIA</p><h2>Każda osoba policzona osobno.</h2><ul>{plan.profile.members.map((member) => <li key={member.id}><strong>{memberLabel(member)}</strong><span>{member.age} lat · {member.height} cm</span></li>)}</ul></section>
+        </div>
+
+        <aside className="pdf-live-note"><strong>Ten dokument jest mapą dnia, nie danymi na żywo.</strong><span>Kolejki, pogoda i alert Antistorm zmieniają się — przed kolejnym punktem otwórzcie żywy plan z linku na dole.</span></aside>
+        <footer className="pdf-page-footer"><span>Wygenerowano {generatedLabel}</span><span>01</span></footer>
+      </section>
+
       {plan.days.map((rawDay, dayIndex) => {
         const day = annotatedDay(rawDay);
         const dateLabel = planDayDateLabel(plan, dayIndex, false);
-        return <section className="print-day" key={day.day}><h2>{day.label}{dateLabel ? ` · ${dateLabel}` : ""} <small>{day.stats.start}–{day.stats.end}</small></h2>{day.steps.map((step) => {
-          if (step.kind === "meal") return <div className="print-step meal" key={step.id}><strong>{formatPlanTime(step.startMin)} · OBIAD</strong><span>{step.title}</span><small>{step.description}</small></div>;
-          if (step.kind === "flex") return <div className="print-step flex" key={step.id}><strong>{formatPlanTime(step.startMin)}–{formatPlanTime(step.unplannedUntil ?? step.endMin)} · BUFOR</strong><span>{step.title}</span><small>{step.description}</small></div>;
-          if (step.kind === "ride") { const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId]; return <div className="print-step" key={step.id}><strong>{formatPlanTime(step.startMin)} · {step.sequence}</strong><span>{ride.name}</span><small>{zoneLabel(ride.zone)} · {attractionLabel(ride)} · wszyscy</small></div>; }
-          return <div className="print-step split" key={step.id}><strong>{formatPlanTime(step.startMin)} · {step.sequence} · PODZIAŁ</strong>{step.assignments.map((assignment) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; return <span key={assignment.attractionId}>{assignment.label}: <b>{ride.name}</b> — {assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</span>; })}<small>Spotkanie {step.reunion.time}: {step.reunion.label}</small></div>;
-        })}</section>;
+        const attractionCount = day.steps.reduce((count, step) => count + (step.kind === "ride" ? 1 : step.kind === "split" ? step.assignments.length : 0), 0);
+        return <section className="pdf-page pdf-day-page" key={day.day}>
+          <header className="pdf-brandline"><span className="pdf-brand compact"><img src={`${import.meta.env.BASE_URL}icon-192-v3.png`} alt="" /><span><strong>PogodaPark</strong><small>PLAN DLA WAS</small></span></span><span className="pdf-edition">DZIEŃ {day.day ?? dayIndex + 1} Z {plan.days.length}</span></header>
+          <div className="pdf-day-heading"><div><p>{dateLabel || `Dzień ${dayIndex + 1}`}</p><h2>{day.label || `Dzień ${dayIndex + 1}`}</h2></div><strong>{day.stats.start}<i>–</i>{day.stats.end}</strong></div>
+          <figure className="pdf-day-hero"><img src={`${import.meta.env.BASE_URL}assets/onboarding/${PRINT_DAY_ART[dayIndex % PRINT_DAY_ART.length]}`} alt="Filcowa mapa dnia" /><figcaption><span><strong>{attractionCount}</strong> atrakcji</span><span><strong>~{day.stats.walkingMinutes}</strong> min marszu</span><span><strong>{day.stats.start}–{day.stats.end}</strong> pełny dzień</span></figcaption></figure>
+          <div className="pdf-timeline">
+            {day.steps.map((step) => {
+              if (step.kind === "meal") return <div className="pdf-step meal" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/06-obiad.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>OBIAD</small></strong><span><b>{step.title}</b><small>{step.description}</small></span></div>;
+              if (step.kind === "flex") return <div className="pdf-step flex" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/01-czas.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>DO {formatPlanTime(step.unplannedUntil ?? step.endMin)}</small></strong><span><b>{step.title}</b><small>{step.description}</small></span></div>;
+              if (step.kind === "ride") { const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId]; return <div className="pdf-step ride" key={step.id}><i>{step.sequence}</i><strong>{formatPlanTime(step.startMin)}<small>WSZYSCY</small></strong><span><b>{ride.name}</b><small>{zoneLabel(ride.zone)} · {attractionLabel(ride)}</small></span></div>; }
+              return <div className="pdf-step split" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/05-podzial.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>PODZIAŁ {step.sequence}</small></strong><span>{step.assignments.map((assignment) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; return <b key={assignment.attractionId}>{assignment.label}: {ride.name}<small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</small></b>; })}<em>Spotkanie {step.reunion.time}: {step.reunion.label}</em></span></div>;
+            })}
+          </div>
+          <aside className="pdf-day-reminder"><strong>Bufor jest częścią planu.</strong><span>Jeśli atrakcje pójdą szybciej, wykorzystajcie wolny czas na WC, odpoczynek albo jedną z propozycji zapasowych — nie skracajcie dnia w ciemno.</span></aside>
+          <footer className="pdf-page-footer"><span>Pełne opisy, prowadzenie i aktualne dane: <a href={planUrl}>otwórz żywy plan</a></span><span>{String(dayIndex + 2).padStart(2, "0")}</span></footer>
+        </section>;
       })}
-      <footer><p><a href={planUrl}>Otwórz żywy plan w aplikacji</a> — pełny adres jest zapisany w tym hiperłączu.</p><p>Ten wydruk zawiera wpisane imiona, wiek i wzrost uczestników. Udostępniaj go świadomie.</p><p>Ograniczenia przy wejściu i decyzje obsługi parku mają pierwszeństwo. Kolejki są migawką z momentu planowania.</p></footer>
     </article>
+  );
+}
+
+function PdfPreview({ plan, planUrl, onClose }) {
+  const closeRef = useRef(null);
+  const [preparing, setPreparing] = useState(false);
+
+  useLayoutEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus({ preventScroll: true });
+    const onKeyDown = (event) => { if (event.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  const printDocument = async () => {
+    setPreparing(true);
+    try {
+      await document.fonts?.ready;
+      const images = [...document.querySelectorAll(".pdf-preview-layer .print-plan img")];
+      await Promise.all(images.map((image) => image.complete ? image.decode?.().catch(() => {}) : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); })));
+      window.print();
+    } finally {
+      setPreparing(false);
+    }
+  };
+
+  return (
+    <section className="pdf-preview-layer" role="dialog" aria-modal="true" aria-label="Podgląd dokumentu PDF">
+      <header className="pdf-preview-toolbar"><button ref={closeRef} type="button" onClick={onClose}><ArrowLeft size={19} weight="bold" /> Wróć do planu</button><span><strong>Wasz piękny PDF</strong><small>Podgląd stron A4</small></span><button className="pdf-print-action" type="button" onClick={printDocument} disabled={preparing}><Printer size={19} weight="bold" /> {preparing ? "Przygotowuję…" : "Drukuj / zapisz"}</button></header>
+      <div className="pdf-preview-scroll"><PrintablePlan plan={plan} planUrl={planUrl} preview /></div>
+    </section>
   );
 }
 
@@ -690,6 +771,7 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState("");
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [showPdfPreview, setShowPdfPreview] = useState(false);
   const shareUrlRef = useRef(null);
   const day = annotatedDay(plan.days[selectedDay] ?? plan.days[0] ?? { steps: [], stats: {} });
   const mapItems = planMapItems(day);
@@ -766,7 +848,7 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
       <main className="plan-shell screen-app">
         <header className="plan-topbar"><div><p className="eyebrow">PLAN DLA WAS</p><h1 ref={planHeadingRef} tabIndex="-1">Wasza Energylandia</h1></div><div className="plan-topbar-actions"><button type="button" onClick={handleReanalyze} disabled={reanalyzing}><ArrowClockwise className={reanalyzing ? "spin" : ""} size={17} /> {reanalyzing ? "Liczę…" : "Przelicz"}</button><button type="button" onClick={onEdit}><PencilSimple size={17} /> Zmień</button></div></header>
         {!plan.safety?.valid && <div className="safety-alert"><WarningCircle size={22} weight="fill" /><span><strong>Plan wymaga poprawy</strong><small>{plan.safety?.issues?.[0]}</small></span></div>}
-        <RainSafetyCard assessment={weatherAssessment} status={weatherStatus} onRefresh={onRefreshWeather} />
+        <RainSafetyCard assessment={weatherAssessment} status={weatherStatus} onRefresh={onRefreshWeather} compact />
         <section className="plan-hero" aria-live="polite">
           <p>DZIEŃ {day.day ?? selectedDay + 1} Z {plan.days.length} • {plan.profile.members.length} OSÓB</p>
           <h2>{firstRide ? <>{completedToday > 0 ? "Teraz czas na" : "Zacznijcie od"}<br /><em>{firstRide.name}</em></> : `Dzień ${day.day ?? selectedDay + 1} zaliczony`}</h2>
@@ -804,14 +886,14 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
 
         <section className="export-section" aria-labelledby="export-title">
           <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>Link nie zawiera imion ani bieżącej lokalizacji, ale zachowuje wiek, wzrost i role potrzebne do sprawdzenia bezpieczeństwa. Stan „zaliczone” zostaje tylko na tym telefonie.</p>
-          <div className="export-actions"><button type="button" onClick={share}><ShareNetwork size={21} weight="bold" /> Udostępnij plan</button><button type="button" onClick={copy}><Copy size={21} weight="bold" /> Kopiuj link</button><button type="button" onClick={() => window.print()}><Printer size={21} weight="bold" /> Drukuj / zapisz PDF</button></div>
+          <div className="export-actions"><button type="button" onClick={share}><ShareNetwork size={21} weight="bold" /> Udostępnij plan</button><button type="button" onClick={copy}><Copy size={21} weight="bold" /> Kopiuj link</button><button type="button" onClick={() => setShowPdfPreview(true)}><Printer size={21} weight="bold" /> Przygotuj piękny PDF</button></div>
           <form className="email-box" onSubmit={openEmail}><label><span>Adres e-mail</span><input type="email" required placeholder="np. rodzina@example.com" value={email} onChange={(event) => setEmail(event.target.value)} /></label><button type="submit"><EnvelopeSimple size={20} weight="bold" /> Otwórz szkic e-maila</button><small>Nie wysyłamy ani nie zapisujemy adresu. Szkic pocztowy zawiera pełną rozpiskę i wpisane nazwy uczestników; PDF możesz zapisać powyżej i dołączyć samodzielnie.</small></form>
           <input ref={shareUrlRef} className="share-url" readOnly value={planUrl} aria-label="Link do planu" />
         </section>
         <footer className="app-footer">Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji, OpenStreetMap i Queue-Times.</footer>
         {notice && <div className="toast" role="status">{notice}</div>}
       </main>
-      <PrintablePlan plan={plan} planUrl={planUrl} />
+      {showPdfPreview && <PdfPreview plan={plan} planUrl={planUrl} onClose={() => setShowPdfPreview(false)} />}
       {selectedAttraction && <DetailSheet attraction={selectedAttraction} sequence={selectedAssignment.sequence} memberIds={selectedAssignment.memberIds} members={plan.profile.members} onClose={closeDetail} />}
     </>
   );
@@ -823,7 +905,8 @@ export function App() {
     try { return planFromHash(); } catch { return null; }
   }, []);
   const storedPlan = useMemo(() => safeSanitizePlan(readStored(PLAN_KEY, null)), []);
-  const [screen, setScreen] = useState(sharedPlan ? "plan" : "weather");
+  const [screen, setScreen] = useState(sharedPlan ? "plan" : "entry");
+  const [welcomeBackScreen, setWelcomeBackScreen] = useState("entry");
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState(() => normalizeDraftProfile(readStored(DRAFT_KEY, DEFAULT_PROFILE), DEFAULT_PROFILE));
   const [plan, setPlan] = useState(sharedPlan);
@@ -931,11 +1014,12 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [buildPlanForProfile, profile, queues]);
 
-  const prepareFreshPlan = ({ dayCount = 1, startDate = null } = {}) => {
+  const prepareFreshPlan = ({ dayCount = 1, startDate = null } = {}, backScreen = "entry") => {
     const freshProfile = normalizeDraftProfile({ ...DEFAULT_PROFILE, dayCount, visitStartDate: startDate }, DEFAULT_PROFILE);
     setGenerationError("");
     setProfile(freshProfile);
     setStep(0);
+    setWelcomeBackScreen(backScreen);
     setScreen("welcome");
     window.scrollTo({ top: 0, behavior: "auto" });
   };
@@ -957,11 +1041,15 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "auto" });
   };
 
-  if (screen === "weather") {
-    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} damagedLink={sharedHashPresent && !sharedPlan} onContinue={prepareFreshPlan} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
+  if (screen === "entry") {
+    return <EntryStart onWeather={() => setScreen("weather")} onPlan={() => prepareFreshPlan({}, "entry")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
   }
 
-  if (screen === "welcome") return <Welcome onStart={beginOnboarding} onBack={() => setScreen("weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
+  if (screen === "weather") {
+    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} damagedLink={sharedHashPresent && !sharedPlan} onBack={() => setScreen("entry")} onContinue={(selection) => prepareFreshPlan(selection, "weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
+  }
+
+  if (screen === "welcome") return <Welcome onStart={beginOnboarding} onBack={() => setScreen(welcomeBackScreen)} backLabel={welcomeBackScreen === "weather" ? "Wróć do pogody" : "Wróć do początku"} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
 
   if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={() => refreshQueues()} generationError={generationError} weatherAssessment={weatherAssessment} />;
   if (!plan) return null;
