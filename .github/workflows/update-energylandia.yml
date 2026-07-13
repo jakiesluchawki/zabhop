@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "apps/pogoda-energylandia/**"
+      - "apps/planer-energylandia/**"
       - "pogoda-energylandia/**"
       - ".github/workflows/update-energylandia.yml"
   workflow_dispatch:
@@ -36,7 +37,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/pogoda-energylandia/package-lock.json
+          cache-dependency-path: |
+            apps/pogoda-energylandia/package-lock.json
+            apps/planer-energylandia/package-lock.json
 
       - name: Zainstaluj zależności
         run: npm ci
@@ -50,6 +53,22 @@ jobs:
       - name: Zbuduj aplikację
         run: npm run build
 
+      - name: Zainstaluj zależności nowego planera
+        working-directory: apps/planer-energylandia
+        run: npm ci
+
+      - name: Uruchom testy nowego planera
+        working-directory: apps/planer-energylandia
+        run: npm test
+
+      - name: Przekaż aktualne kolejki do nowego planera
+        working-directory: .
+        run: cp apps/pogoda-energylandia/public/live-queues.json apps/planer-energylandia/public/live-queues.json
+
+      - name: Zbuduj nowy planer
+        working-directory: apps/planer-energylandia
+        run: npm run build
+
       - name: Złóż cały serwis Pages
         working-directory: .
         run: |
@@ -61,6 +80,7 @@ jobs:
             --exclude _site \
             ./ _site/
           rsync -a --delete apps/pogoda-energylandia/dist/ _site/pogoda-energylandia/
+          rsync -a --delete apps/planer-energylandia/dist/ _site/planer-energylandia/
 
       - name: Skonfiguruj GitHub Pages
         uses: actions/configure-pages@v5
