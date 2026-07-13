@@ -77,7 +77,7 @@ export function ParkMap({
       if (!point) return;
       const selected = attraction.id === selectedId;
       const primary = attraction.familyTier === "primary";
-      const sequence = index + 1;
+      const sequence = Number.isFinite(attraction.sequence) ? attraction.sequence : index + 1;
       const size = selected ? 46 : 42;
       const tierClass = primary ? "primary" : "secondary";
       const accessibleName = `${sequence}. ${attraction.name}, ${

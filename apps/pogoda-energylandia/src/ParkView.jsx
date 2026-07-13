@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppleLogo,
   ArrowClockwise,
@@ -175,6 +175,7 @@ function ParkSourcesSheet({ onClose }) {
 }
 
 function MapNavigationSheet({ attraction, sequence, onClose }) {
+  const sheetRef = useRef(null);
   const closeButtonRef = useRef(null);
   const previousFocusRef = useRef(null);
   const [imageFailed, setImageFailed] = useState(false);
@@ -183,18 +184,41 @@ function MapNavigationSheet({ attraction, sequence, onClose }) {
 
   useEffect(() => setImageFailed(false), [details.imageUrl]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     previousFocusRef.current = document.activeElement;
-    closeButtonRef.current?.focus();
+    const sheet = sheetRef.current;
+    const resetSheetScroll = () => {
+      if (sheet) sheet.scrollTop = 0;
+    };
+    resetSheetScroll();
+
+    // iOS Safari scrolls the visual viewport when an element is focused while
+    // its parent is still entering with translateY(100%). Focus only after the
+    // sheet animation and explicitly prevent any automatic scrolling.
+    let focusApplied = false;
+    const focusCloseButton = () => {
+      if (focusApplied) return;
+      focusApplied = true;
+      resetSheetScroll();
+      closeButtonRef.current?.focus({ preventScroll: true });
+      resetSheetScroll();
+    };
+    const animationFallback = window.setTimeout(focusCloseButton, 260);
+    const resetFrame = window.requestAnimationFrame(resetSheetScroll);
+    sheet?.addEventListener("animationend", focusCloseButton, { once: true });
+
     const closeOnEscape = (event) => {
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => {
+      window.clearTimeout(animationFallback);
+      window.cancelAnimationFrame(resetFrame);
+      sheet?.removeEventListener("animationend", focusCloseButton);
       document.removeEventListener("keydown", closeOnEscape);
-      previousFocusRef.current?.focus?.();
+      previousFocusRef.current?.focus?.({ preventScroll: true });
     };
-  }, [onClose]);
+  }, [attraction.id, onClose]);
 
   if (!links) return null;
 
@@ -203,7 +227,7 @@ function MapNavigationSheet({ attraction, sequence, onClose }) {
   return (
     <div className="sheet-layer">
       <button className="sheet-backdrop" type="button" aria-label="Zamknij szczegóły atrakcji" onClick={onClose} />
-      <section className="bottom-sheet map-navigation-sheet" role="dialog" aria-modal="true" aria-labelledby="map-navigation-title" aria-describedby="attraction-summary map-navigation-note">
+      <section ref={sheetRef} className="bottom-sheet map-navigation-sheet" role="dialog" aria-modal="true" aria-labelledby="map-navigation-title" aria-describedby="attraction-summary map-navigation-note">
         <div className="sheet-handle" aria-hidden="true" />
         <header className="sheet-header">
           <div>
@@ -288,7 +312,9 @@ function MapNavigationSheet({ attraction, sequence, onClose }) {
 export function ParkView({ weather }) {
   const [completedIds, setCompletedIds] = useState(() => {
     const stored = loadStored(COMPLETED_KEY, []);
-    return Array.isArray(stored) ? stored.filter((id) => FAMILY_ATTRACTION_IDS.has(id)) : [];
+    return Array.isArray(stored)
+      ? [...new Set(stored.filter((id) => FAMILY_ATTRACTION_IDS.has(id)))]
+      : [];
   });
   const [queues, setQueues] = useState(null);
   const [queueError, setQueueError] = useState("");
@@ -351,6 +377,16 @@ export function ParkView({ weather }) {
     queueById,
   }), [familyHeight, completedIds, queueById]);
 
+  // Keep a stable, complete checklist even when a ride is closed or already
+  // completed. The live route below still drives the next stop and map.
+  const fullRoute = useMemo(() => buildRoute({
+    height: familyHeight,
+    age: FAMILY_PROFILE.childAge,
+    completedIds: [],
+    queueById: {},
+  }), [familyHeight]);
+  const completedIdSet = useMemo(() => new Set(completedIds), [completedIds]);
+
   const nextStop = useMemo(() => chooseNextStop({
     position,
     height: familyHeight,
@@ -359,7 +395,7 @@ export function ParkView({ weather }) {
     queueById,
   }) || route.find((stop) => stop.familyTier === "primary") || route[0] || null, [position, familyHeight, completedIds, queueById, route]);
 
-  const selectedStop = route.find((stop) => stop.id === selectedId)
+  const selectedStop = fullRoute.find((stop) => stop.id === selectedId)
     || ATTRACTIONS.find((stop) => stop.id === selectedId)
     || nextStop;
   const currentOrigin = position || locationOf(nextStop);
@@ -406,6 +442,15 @@ export function ParkView({ weather }) {
     setNavigationStop(null);
   }, []);
 
+  const toggleCompleted = useCallback((id) => {
+    if (!id) return;
+    setCompletedIds((current) => current.includes(id)
+      ? current.filter((completedId) => completedId !== id)
+      : [...current, id]);
+    setSelectedId((current) => current === id ? null : current);
+    setFocus(null);
+  }, []);
+
   const selectAttraction = useCallback((attraction) => {
     setMapMode("route");
     setSelectedId(attraction.id);
@@ -429,29 +474,49 @@ export function ParkView({ weather }) {
     window.localStorage.setItem(TOILET_KEY, String(now));
   }, []);
 
-  const primaryRoute = route.filter((stop) => stop.familyTier === "primary");
-  const secondaryRoute = route.filter((stop) => stop.familyTier === "secondary");
-  const displayRoute = [...primaryRoute, ...secondaryRoute];
+  const primaryRoute = fullRoute.filter((stop) => stop.familyTier === "primary");
+  const secondaryRoute = fullRoute.filter((stop) => stop.familyTier === "secondary");
+  const displayRoute = [...primaryRoute, ...secondaryRoute].map((stop, index) => ({
+    ...stop,
+    sequence: index + 1,
+  }));
+  const activeRouteIds = new Set(route.map((stop) => stop.id));
+  const mapRoute = displayRoute.filter((stop) => activeRouteIds.has(stop.id));
   const navigationSequence = navigationStop
     ? displayRoute.findIndex((stop) => stop.id === navigationStop.id) + 1
     : 0;
 
   const renderRouteRow = (stop, index) => {
     const queue = queueForAttraction(stop, queues);
+    const completed = completedIdSet.has(stop.id);
     return (
-      <button
-        className={`tier-${stop.familyTier} ${stop.id === selectedStop?.id ? "selected" : ""}`}
-        type="button"
+      <div
+        className={`route-item tier-${stop.familyTier} ${stop.id === selectedStop?.id ? "selected" : ""} ${completed ? "completed" : ""}`}
         key={stop.id}
         data-attraction-id={stop.id}
-        aria-haspopup="dialog"
-        onClick={() => selectAttraction(stop)}
       >
-        <span className="route-number">{index + 1}</span>
-        <span className="route-copy"><strong>{stop.name}</strong><small>{zoneName(stop.zone)} • {restrictionLabel(stop)}</small></span>
-        <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""}`}>{queueLabel(queue)}</span>
-        <CaretRight size={17} aria-hidden="true" />
-      </button>
+        <button
+          className="route-detail-button"
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => selectAttraction(stop)}
+        >
+          <span className="route-number">{index + 1}</span>
+          <span className="route-copy"><strong>{stop.name}</strong><small>{zoneName(stop.zone)} • {restrictionLabel(stop)}</small></span>
+          <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""} ${completed ? "completed" : ""}`}>{completed ? "zaliczone" : queueLabel(queue)}</span>
+          <CaretRight size={17} aria-hidden="true" />
+        </button>
+        <button
+          className="route-complete-button"
+          type="button"
+          aria-pressed={completed}
+          aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${stop.name}`}
+          title={completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}
+          onClick={() => toggleCompleted(stop.id)}
+        >
+          <CheckCircle size={24} weight={completed ? "fill" : "regular"} aria-hidden="true" />
+        </button>
+      </div>
     );
   };
 
@@ -539,7 +604,7 @@ export function ParkView({ weather }) {
             </div>
           </div>
           <ParkMap
-            attractions={displayRoute}
+            attractions={mapRoute}
             toilets={TOILETS}
             position={position}
             selectedId={selectedId}
@@ -564,7 +629,7 @@ export function ParkView({ weather }) {
         <section className="route-section" aria-labelledby="route-title">
           <div className="section-heading-row">
             <div><p className="eyebrow">OD TYŁU DO WYJŚCIA</p><h2 id="route-title">Plan bez biegania</h2></div>
-            <span className="route-progress">{completedIds.length}/{route.length + completedIds.length}</span>
+            <span className="route-progress">{completedIdSet.size}/{displayRoute.length}</span>
           </div>
           <p className="route-intro">Najpierw zielone hity od 120 cm: Sweet Valley → Aqualantis → Formuła → Strefa Familijna. Żółte traktujcie jako zapas po drodze.</p>
 
