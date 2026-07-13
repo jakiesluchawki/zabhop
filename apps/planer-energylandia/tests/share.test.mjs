@@ -19,6 +19,37 @@ const profile = {
   meal: { mode: "fast", time: "13:15" },
 };
 
+function planWithOfficialShow() {
+  const plan = buildUniversalPlan({ ...profile, dayCount: 1 });
+  plan.profile.entertainment = { includeShows: true };
+  const day = plan.days[0];
+  const finalFlex = day.steps.at(-1);
+  assert.equal(finalFlex.kind, "flex");
+  const performanceStartMin = finalFlex.startMin + 10;
+  const show = {
+    id: "day-1-show-funny-in-sweet-valley-show-1120",
+    kind: "show",
+    showId: "funny-in-sweet-valley-show",
+    title: "Funny in Sweet Valley Show",
+    description: "Zabawny show dla małych i dużych, prowadzony przez charyzmatycznego bohatera.",
+    venue: "Town Hall Theatre",
+    officialUrl: "https://energylandia.pl/show/funny-in-sweet-valley-show/",
+    mapUrl: "https://energylandia.pl/mapa-parku/?location=238",
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2026/04/funny_in_sv.jpg",
+    zone: "sweet-valley",
+    startMin: finalFlex.startMin,
+    performanceStartMin,
+    endMin: performanceStartMin + 15,
+    durationMinutes: 15,
+    performanceTimes: ["18:30", "18:40", "19:15"],
+    walkingMinutes: 6,
+    sourceCheckedAt: "2026-07-14T08:30:00.000Z",
+  };
+  finalFlex.startMin = show.endMin;
+  day.steps.splice(-1, 0, show);
+  return plan;
+}
+
 test("plan przechodzi bezpieczny round-trip przez link", () => {
   const plan = buildUniversalPlan(profile);
   const decoded = decodePlan(encodePlan(plan));
@@ -195,6 +226,55 @@ test("link anonimizuje nazwy i ID, zachowując dane wymagane do kontroli bezpiec
   assert.equal(decoded.safety.valid, true);
 });
 
+test("dobrowolny pokaz z oficjalnym opisem przechodzi bezpiecznie przez link", () => {
+  const plan = planWithOfficialShow();
+  const decoded = decodePlan(encodePlan(plan));
+
+  assert.ok(decoded);
+  assert.equal(decoded.profile.entertainment.includeShows, true);
+  const show = decoded.days[0].steps.find((step) => step.kind === "show");
+  assert.deepEqual(show, {
+    id: "day-1-show-funny-in-sweet-valley-show-1120",
+    kind: "show",
+    showId: "funny-in-sweet-valley-show",
+    title: "Funny in Sweet Valley Show",
+    description: "Zabawny show dla małych i dużych, prowadzony przez charyzmatycznego bohatera.",
+    venue: "Town Hall Theatre",
+    officialUrl: "https://energylandia.pl/show/funny-in-sweet-valley-show/",
+    mapUrl: "https://energylandia.pl/mapa-parku/?location=238",
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2026/04/funny_in_sv.jpg",
+    zone: "sweet-valley",
+    startMin: 1110,
+    performanceStartMin: 1120,
+    endMin: 1135,
+    durationMinutes: 15,
+    durationLabel: "15 min",
+    performanceTimes: ["18:30", "18:40", "19:15"],
+    walkingMinutes: 6,
+    sourceCheckedAt: "2026-07-14T08:30:00.000Z",
+  });
+  assert.equal(decoded.days[0].steps.length, 15);
+  assert.equal(decoded.safety.valid, true);
+});
+
+test("pokaz jest odrzucany bez świadomego włączenia oraz dla obcych danych", () => {
+  const disabled = planWithOfficialShow();
+  disabled.profile.entertainment.includeShows = false;
+  assert.equal(sanitizeSharedPlan(disabled), null);
+
+  const foreignUrl = planWithOfficialShow();
+  foreignUrl.days[0].steps.find((step) => step.kind === "show").officialUrl = "https://example.com/show/funny";
+  assert.equal(sanitizeSharedPlan(foreignUrl), null);
+
+  const missingRelevantTime = planWithOfficialShow();
+  missingRelevantTime.days[0].steps.find((step) => step.kind === "show").performanceTimes = ["18:30"];
+  assert.equal(sanitizeSharedPlan(missingRelevantTime), null);
+
+  const brokenDuration = planWithOfficialShow();
+  brokenDuration.days[0].steps.find((step) => step.kind === "show").durationMinutes = 20;
+  assert.equal(sanitizeSharedPlan(brokenDuration), null);
+});
+
 test("import odrzuca duplikaty uczestników i ponownie liczy statystyki", () => {
   const plan = buildUniversalPlan(profile);
   const duplicate = structuredClone(plan);
@@ -217,4 +297,10 @@ test("szkic e-maila zawiera rozpiskę bez wielotysięcznego hasha planu", () => 
   assert.ok(decodeURIComponent(draft).includes("Dzień 1"));
   assert.equal(decodeURIComponent(draft).includes("#plan="), false);
   assert.ok(draft.length < 7000);
+});
+
+test("szkic e-maila jasno opisuje wstawiony pokaz", () => {
+  const plan = planWithOfficialShow();
+  const draft = decodeURIComponent(createEmailDraftUrl("rodzina@example.com", "https://example.com/planer/#plan=sekret", plan));
+  assert.match(draft, /18:40 — POKAZ: Funny in Sweet Valley Show \(15 min, Town Hall Theatre\)/);
 });

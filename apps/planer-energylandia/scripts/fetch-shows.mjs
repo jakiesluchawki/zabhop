@@ -9,6 +9,8 @@ const destination = resolve(scriptDirectory, "../public/live-shows.json");
 const temporaryDestination = `${destination}.tmp`;
 const checkedAt = new Date().toISOString();
 const userAgent = "PogodaPark/1.0 (+https://jakiesluchawki.github.io/zabhop/planer-energylandia/)";
+const minimumRefreshAgeMs = 45 * 60_000;
+const forceRefresh = process.argv.includes("--force");
 
 function sleep(milliseconds) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
@@ -54,6 +56,17 @@ async function retainPreviousSnapshot(message, previousSnapshot) {
   throw new Error(`${message}; brak poprawnej poprzedniej migawki.`);
 }
 
+function isRecentHealthySnapshot(snapshot) {
+  const checkedAtMs = Date.parse(snapshot?.source?.checkedAt || "");
+  return !forceRefresh
+    && snapshot?.source?.status === "fresh"
+    && Array.isArray(snapshot?.shows)
+    && snapshot.shows.length >= 3
+    && Number.isFinite(checkedAtMs)
+    && Date.now() - checkedAtMs >= 0
+    && Date.now() - checkedAtMs < minimumRefreshAgeMs;
+}
+
 function scheduleRange(shows) {
   const dates = shows.flatMap((show) => show.schedule?.map((entry) => entry.date) ?? []).sort();
   return dates.length ? { from: dates[0], to: dates.at(-1) } : null;
@@ -61,6 +74,10 @@ function scheduleRange(shows) {
 
 async function refresh() {
   const previous = await readPreviousSnapshot();
+  if (isRecentHealthySnapshot(previous)) {
+    console.log(`Oficjalny terminarz ma mniej niż ${Math.round(minimumRefreshAgeMs / 60_000)} min — zachowuję świeżą migawkę.`);
+    return;
+  }
   let indexHtml;
   try {
     indexHtml = await fetchText(indexUrl);

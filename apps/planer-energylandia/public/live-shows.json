@@ -3,7 +3,7 @@
   "source": {
     "label": "Oficjalne strony pokazów Energylandii",
     "url": "https://energylandia.pl/show/",
-    "checkedAt": "2026-07-13T18:50:58.916Z",
+    "checkedAt": "2026-07-13T22:16:43.600Z",
     "timezone": "Europe/Warsaw",
     "status": "fresh",
     "indexCount": 18,
@@ -30,7 +30,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "11:30",
             "17:00",
@@ -40,7 +40,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "11:30",
             "17:00",
@@ -70,7 +70,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -87,7 +87,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "12:00",
             "14:00",
@@ -97,7 +97,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "12:00",
             "14:00",
@@ -127,7 +127,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -144,7 +144,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "13:30",
             "16:30"
@@ -152,7 +152,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "13:30",
             "16:30"
@@ -176,7 +176,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -193,14 +193,14 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "15:00"
           ]
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "15:00"
           ]
@@ -221,7 +221,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -238,14 +238,14 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "18:00"
           ]
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "18:00"
           ]
@@ -266,7 +266,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -283,14 +283,14 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "19:00"
           ]
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "19:00"
           ]
@@ -311,7 +311,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -328,7 +328,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "12:00",
             "14:30",
@@ -338,7 +338,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "12:00",
             "14:30",
@@ -368,7 +368,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -384,7 +384,7 @@
       "officialModifiedAt": "2026-07-09T12:32:27.000Z",
       "schedule": [],
       "completeForScheduling": false,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -401,7 +401,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "12:15",
             "13:45",
@@ -411,7 +411,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "12:15",
             "13:45",
@@ -441,7 +441,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -457,7 +457,7 @@
       "officialModifiedAt": "2024-06-20T11:36:09.000Z",
       "schedule": [],
       "completeForScheduling": false,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -473,7 +473,7 @@
       "officialModifiedAt": "2026-07-08T16:32:03.000Z",
       "schedule": [],
       "completeForScheduling": false,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -489,7 +489,7 @@
       "officialModifiedAt": "2024-06-20T08:16:46.000Z",
       "schedule": [],
       "completeForScheduling": false,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -506,7 +506,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "10:00",
             "11:00",
@@ -518,7 +518,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "10:00",
             "11:00",
@@ -554,7 +554,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -570,7 +570,7 @@
       "officialModifiedAt": "2024-06-20T11:51:22.000Z",
       "schedule": [],
       "completeForScheduling": false,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -587,7 +587,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "13:30",
             "15:15",
@@ -597,7 +597,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "13:30",
             "15:15",
@@ -627,7 +627,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -644,7 +644,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "13:00",
             "14:45",
@@ -653,7 +653,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "13:00",
             "14:45",
@@ -680,7 +680,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -696,7 +696,7 @@
       "officialModifiedAt": "2026-06-30T14:02:05.000Z",
       "schedule": [],
       "completeForScheduling": false,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     },
     {
@@ -713,7 +713,7 @@
       "schedule": [
         {
           "date": "2026-07-14",
-          "label": "Jutro , 14 lipca",
+          "label": "Dziś , 14 lipca",
           "times": [
             "12:45",
             "14:15",
@@ -723,7 +723,7 @@
         },
         {
           "date": "2026-07-15",
-          "label": "środa , 15 lipca",
+          "label": "Jutro , 15 lipca",
           "times": [
             "12:45",
             "14:15",
@@ -753,7 +753,7 @@
         }
       ],
       "completeForScheduling": true,
-      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "checkedAt": "2026-07-13T22:16:43.600Z",
       "stale": false
     }
   ],

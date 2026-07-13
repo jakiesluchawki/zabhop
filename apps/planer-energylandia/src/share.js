@@ -2,7 +2,9 @@ import { ALL_ATTRACTIONS_BY_ID, RESTAURANTS } from "./extendedData.js";
 import { formatPlanTime, timeToMinutes, validatePlanSafety } from "./planner.js";
 
 const MAX_MEMBERS = 14;
-const MAX_STEPS_PER_DAY = 14;
+// Jeden dobrowolny pokaz może wejść do trasy, ale nie powinien zjadać miejsca
+// na którykolwiek z podstawowych kroków dnia.
+const MAX_STEPS_PER_DAY = 15;
 const RESTAURANT_IDS = new Set(RESTAURANTS.map((restaurant) => restaurant.id));
 const RESTAURANTS_BY_ID = Object.fromEntries(RESTAURANTS.map((restaurant) => [restaurant.id, restaurant]));
 const VALID_INTERESTS = new Set(["coasters", "water", "family", "scenic"]);
@@ -30,6 +32,76 @@ function validDateKey(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
   const parsed = new Date(`${key}T12:00:00Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key ? key : null;
+}
+
+function validIsoTimestamp(value) {
+  if (
+    typeof value !== "string"
+    || value.length > 48
+    || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:?\d{2})$/.test(value)
+  ) return null;
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) return null;
+  try {
+    // Normalizujemy do jednego, jednoznacznego ISO. Dzięki temu payload nie
+    // przenosi lokalnych stref ani nieprawidłowych dat, które Date potrafi
+    // czasem „naprawić” przez przesunięcie miesiąca.
+    return new Date(parsed).toISOString();
+  } catch {
+    return null;
+  }
+}
+
+function officialEnergylandiaUrl(value, pathnameCheck) {
+  if (typeof value !== "string" || value.length > 600) return null;
+  try {
+    const url = new URL(value);
+    const officialHost = url.protocol === "https:"
+      && (url.hostname === "energylandia.pl" || url.hostname === "www.energylandia.pl");
+    if (!officialHost || !pathnameCheck(url)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function officialShowUrl(value) {
+  return officialEnergylandiaUrl(value, (url) => /^\/show\/[^/?#]+\/?$/.test(url.pathname));
+}
+
+function officialParkMapUrl(value) {
+  return officialEnergylandiaUrl(value, (url) => {
+    if (!/^\/mapa-parku\/?$/.test(url.pathname)) return false;
+    const location = url.searchParams.get("location");
+    return Boolean(location) && /^[a-z0-9_-]{1,80}$/i.test(location);
+  });
+}
+
+function officialImageUrl(value) {
+  if (typeof value !== "string" || value.length > 600) return null;
+  try {
+    const url = new URL(value);
+    const officialHost = url.protocol === "https:"
+      && (url.hostname === "energylandia.pl" || url.hostname.endsWith(".energylandia.pl"));
+    return officialHost ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function cleanRequiredText(value, maxLength) {
+  if (typeof value !== "string") return null;
+  const cleaned = value.trim().replace(/\s+/g, " ").slice(0, maxLength);
+  return cleaned || null;
+}
+
+function cleanShowTimes(value, selectedTime) {
+  if (value === undefined || value === null) return [formatPlanTime(selectedTime)];
+  if (!Array.isArray(value) || value.length < 1 || value.length > 16) return null;
+  const times = value.map((time) => validTime(time, null));
+  if (times.some((time) => time === null)) return null;
+  const unique = [...new Set(times)].sort((left, right) => timeToMinutes(left, 0) - timeToMinutes(right, 0));
+  return unique.includes(formatPlanTime(selectedTime)) ? unique : null;
 }
 
 function planMinute(value) {
@@ -114,6 +186,57 @@ function sanitizeStep(step, dayIndex, stepIndex) {
       endMin,
       unplannedUntil,
       backupAttractionIds,
+    };
+  }
+
+  if (step.kind === "show") {
+    const showId = String(step.showId || "").trim();
+    const title = cleanRequiredText(step.title, 140);
+    const description = cleanRequiredText(step.description, 700);
+    const venue = cleanRequiredText(step.venue, 140);
+    const officialUrl = officialShowUrl(step.officialUrl);
+    const mapUrl = officialParkMapUrl(step.mapUrl);
+    const sourceCheckedAt = validIsoTimestamp(step.sourceCheckedAt);
+    const performanceStartMin = planMinute(step.performanceStartMin);
+    const durationMinutes = finiteOr(step.durationMinutes, NaN);
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,99}$/i.test(showId)
+      || !title
+      || !description
+      || !venue
+      || !officialUrl
+      || !mapUrl
+      || !sourceCheckedAt
+      || performanceStartMin === null
+      || !Number.isInteger(durationMinutes)
+      || durationMinutes < 5
+      || durationMinutes > 180
+      || performanceStartMin < startMin
+      || endMin !== performanceStartMin + durationMinutes
+    ) return null;
+    const performanceTimes = cleanShowTimes(step.performanceTimes ?? step.times, performanceStartMin);
+    if (!performanceTimes) return null;
+    const imageUrl = step.imageUrl === undefined || step.imageUrl === null ? null : officialImageUrl(step.imageUrl);
+    if (step.imageUrl !== undefined && step.imageUrl !== null && !imageUrl) return null;
+    return {
+      id,
+      kind: "show",
+      showId,
+      title,
+      description,
+      venue,
+      officialUrl,
+      mapUrl,
+      imageUrl,
+      zone: cleanRequiredText(step.zone || "", 40),
+      startMin,
+      performanceStartMin,
+      endMin,
+      durationMinutes,
+      durationLabel: `${durationMinutes} min`,
+      performanceTimes,
+      walkingMinutes: Math.max(0, Math.min(180, finiteOr(step.walkingMinutes, 0))),
+      sourceCheckedAt,
     };
   }
 
@@ -206,6 +329,11 @@ export function sanitizeSharedPlan(input) {
       mode: new Set(["fast", "sit-down", "own", "none"]).has(input.profile.meal?.mode) ? input.profile.meal.mode : "fast",
       time: mealTime,
     },
+    entertainment: {
+      // Tylko literalne true włącza warstwę pokazów. Link z obcym stringiem
+      // lub dawny link bez pola zawsze wraca do bezpiecznego planu bez nich.
+      includeShows: input.profile.entertainment?.includeShows === true,
+    },
     members,
   };
 
@@ -219,6 +347,7 @@ export function sanitizeSharedPlan(input) {
     const steps = [];
     let mealCount = 0;
     let flexCount = 0;
+    let showCount = 0;
     for (let stepIndex = 0; stepIndex < day.steps.length; stepIndex += 1) {
       const step = sanitizeStep(day.steps[stepIndex], dayIndex, stepIndex);
       // Nie pomijamy uszkodzonego kroku po cichu: zmieniłoby to znaczenie
@@ -235,6 +364,7 @@ export function sanitizeSharedPlan(input) {
         }
         if (step.unplannedUntil !== null && step.unplannedUntil !== departure) return null;
       }
+      if (step.kind === "show" && (!profile.entertainment.includeShows || ++showCount > 1)) return null;
       seenStepIds.add(step.id);
       const attractionIds = step.kind === "ride"
         ? [step.attractionId]
@@ -371,6 +501,10 @@ export function createEmailDraftUrl(email, planUrl, plan) {
           return `${ride}: ${people}`;
         }).join(" | ");
         return `${time} — PODZIAŁ — ${routes} — spotkanie ${step.reunion?.time ?? ""}`;
+      }
+      if (step.kind === "show") {
+        const performanceTime = formatPlanTime(step.performanceStartMin ?? step.startMin);
+        return `${performanceTime} — POKAZ: ${step.title} (${step.durationMinutes ?? "?"} min, ${step.venue ?? "miejsce na terenie parku"})`;
       }
       return null;
     }).filter(Boolean),

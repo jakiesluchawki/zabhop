@@ -43,6 +43,7 @@ import {
 } from "./planner.js";
 import { PlannerMap } from "./PlannerMap.jsx";
 import { loadQueueTimes, queueForAttraction } from "./queues.js";
+import { overlayShowsOnPlan } from "./showPlanner.js";
 import {
   createEmailDraftUrl,
   createPlanUrl,
@@ -57,6 +58,7 @@ import {
   normalizeDraftProfile,
   queueFreshness,
 } from "./appUtils.js";
+import { loadShowSchedule, OFFICIAL_SHOW_INDEX, showScheduleFreshness, showsOnDate } from "./shows.js";
 import { loadAntistormNowcast, loadWeather, formatPolishDay } from "./weather.js";
 import { assessThreeDayWeather } from "./weatherPlan.js";
 import { RainSafetyCard, WeatherStart } from "./WeatherStart.jsx";
@@ -96,6 +98,7 @@ const DEFAULT_PROFILE = Object.freeze({
     wet: "ok",
     maxQueue: 30,
   },
+  entertainment: { includeShows: false },
   meal: { mode: "fast", time: "13:15" },
 });
 
@@ -480,6 +483,10 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
               <ChoiceCard title="Po trochu" detail="rodzinne hity i kilka mocniejszych rzeczy" icon={Sparkle} selected={profile.preferences.intensity === "mixed"} onClick={() => updatePreferences({ intensity: "mixed" })} />
               <ChoiceCard title="Mocno" detail="flagowe rollercoastery i adrenalina" icon={Sparkle} selected={profile.preferences.intensity === "thrill"} onClick={() => updatePreferences({ intensity: "thrill" })} />
             </div>
+            <div className="entertainment-choice">
+              <span><small>POZA STAŁĄ TRASĄ</small><strong>Pokazy na żywo</strong><em>Jeśli oficjalny terminarz jest świeży, wpiszemy najwyżej jeden pokaz dziennie — tylko w końcowym buforze, bez zabierania atrakcji ani obiadu.</em></span>
+              <button type="button" aria-pressed={profile.entertainment?.includeShows === true} onClick={() => setProfile((current) => ({ ...current, entertainment: { ...current.entertainment, includeShows: !current.entertainment?.includeShows } }))}>{profile.entertainment?.includeShows ? "Tak" : "Nie"}</button>
+            </div>
             <h2 className="mini-heading">Co szczególnie lubicie?</h2>
             <div className="interest-grid">
               {[
@@ -542,6 +549,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
               <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)} ${member.height} cm`).join(" · ")}</small></span></div>
               <div><Sparkle size={22} weight="duotone" /><span><strong>{profile.preferences.intensity === "thrill" ? "Mocny dzień" : profile.preferences.intensity === "calm" ? "Spokojny dzień" : "Po trochu"}</strong><small>kolejki do {profile.preferences.maxQueue} min · woda: {profile.preferences.wet === "avoid" ? "nie" : profile.preferences.wet === "want" ? "tak" : "może być"}</small></span></div>
               <div><ArrowsSplit size={22} weight="duotone" /><span><strong>{effectiveSplitPolicy === "never" ? "Zawsze razem" : effectiveSplitPolicy === "often" ? "Podział dozwolony" : "Jeden wartościowy podział"}</strong><small>{profile.meal.mode === "none" ? "bez zaplanowanego obiadu" : `obiad około ${profile.meal.time}`}</small></span></div>
+              <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.entertainment?.includeShows ? "Sprawdź pokazy na żywo" : "Bez pokazów w trasie"}</strong><small>{profile.entertainment?.includeShows ? "Tylko świeży oficjalny terminarz i tylko bez skracania dnia." : "Możesz zmienić to w kroku „Apetyt”."}</small></span></div>
             </div>
             <button className="edit-review" type="button" onClick={() => goToStep(0)}><PencilSimple size={18} /> Popraw odpowiedzi</button>
             {generationError && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span><strong>Nie ma teraz bezpiecznej trasy dla tych ustawień.</strong><br />{generationError}</span></div>}
@@ -633,7 +641,7 @@ function annotatedDay(day) {
   return {
     ...day,
     steps: day.steps.map((step) => {
-      if (step.kind === "meal" || step.kind === "flex") return step;
+      if (step.kind !== "ride" && step.kind !== "split") return step;
       sequence += 1;
       return { ...step, sequence };
     }),
@@ -708,6 +716,7 @@ function PrintablePlan({ plan, planUrl, preview = false }) {
           <div className="pdf-timeline">
             {day.steps.map((step) => {
               if (step.kind === "meal") return <div className="pdf-step meal" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/06-obiad.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>OBIAD</small></strong><span><b>{step.title}</b><small>{step.description}</small></span></div>;
+              if (step.kind === "show") return <div className="pdf-step show" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/04-apetyt.jpg`} alt="" /><strong>{formatPlanTime(step.performanceStartMin)}<small>POKAZ • {step.durationMinutes} MIN</small></strong><span><b>{step.title}</b><small>{step.venue} · {step.description}</small></span></div>;
               if (step.kind === "flex") return <div className="pdf-step flex" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/01-czas.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>DO {formatPlanTime(step.unplannedUntil ?? step.endMin)}</small></strong><span><b>{step.title}</b><small>{step.description}</small></span></div>;
               if (step.kind === "ride") { const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId]; return <div className="pdf-step ride" key={step.id}><i>{step.sequence}</i><strong>{formatPlanTime(step.startMin)}<small>WSZYSCY</small></strong><span><b>{ride.name}</b><small>{zoneLabel(ride.zone)} · {attractionLabel(ride)}</small></span></div>; }
               return <div className="pdf-step split" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/05-podzial.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>PODZIAŁ {step.sequence}</small></strong><span>{step.assignments.map((assignment) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; return <b key={assignment.attractionId}>{assignment.label}: {ride.name}<small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</small></b>; })}<em>Spotkanie {step.reunion.time}: {step.reunion.label}</em></span></div>;
@@ -757,7 +766,41 @@ function PdfPreview({ plan, planUrl, onClose }) {
   );
 }
 
-function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus, onRefreshWeather }) {
+function ShowSchedulePanel({ plan, day, selectedDay, schedule, status, onRefresh, onToggle }) {
+  const includeShows = plan.profile?.entertainment?.includeShows === true;
+  const dateKey = offsetDateKey(plan.profile?.visitStartDate, selectedDay);
+  const freshness = showScheduleFreshness(schedule);
+  const availableShows = showsOnDate(schedule, dateKey);
+  const scheduledShow = day.steps.find((step) => step.kind === "show") ?? null;
+  const sourceUrl = schedule?.source?.url || OFFICIAL_SHOW_INDEX;
+  const refreshLabel = status === "loading" ? "Odświeżam…" : "Odśwież terminarz";
+
+  return (
+    <section className="shows-section" aria-labelledby="shows-title">
+      <div className="section-heading shows-heading">
+        <div><p className="eyebrow">DYSKRETNY DODATEK</p><h2 id="shows-title">Pokazy na żywo</h2></div>
+        <button className={includeShows ? "active" : ""} type="button" aria-pressed={includeShows} onClick={() => onToggle(!includeShows)}>{includeShows ? "W trasie" : "Dodaj"}</button>
+      </div>
+      <p className="shows-intro">Nie układamy dnia wokół sceny. Gdy tego chcecie, używamy świeżego oficjalnego terminarza i proponujemy najwyżej jeden pokaz dopiero w końcowym buforze.</p>
+      <div className={`shows-source ${freshness.state}`}>
+        <span><CalendarBlank size={20} weight="duotone" /></span>
+        <p><strong>Oficjalny terminarz Energylandii</strong><small>{status === "loading" ? "Sprawdzam aktualną migawkę…" : freshness.state === "fresh" ? freshness.label : `${freshness.label} — nie wpisuję godzin automatycznie.`}</small></p>
+        <button type="button" onClick={onRefresh} disabled={status === "loading"}><ArrowClockwise className={status === "loading" ? "spin" : ""} size={18} weight="bold" /> <span>{refreshLabel}</span></button>
+      </div>
+      {!includeShows && <p className="shows-muted">Trasa zostaje tylko przy atrakcjach. Włącz „Dodaj”, jeśli chcecie, aby planer uważał także na terminy show.</p>}
+      {includeShows && freshness.state !== "fresh" && <p className="shows-warning"><WarningCircle size={18} weight="fill" /><span>Terminarz nie jest teraz wystarczająco świeży, więc nie udajemy pewnej godziny. <a href={sourceUrl} target="_blank" rel="noreferrer">Sprawdź oficjalną rozpiskę</a> i tablice w parku.</span></p>}
+      {includeShows && freshness.state === "fresh" && (
+        <>
+          {scheduledShow ? <article className="scheduled-show"><div><span className="show-time">{formatPlanTime(scheduledShow.performanceStartMin)}</span><p><small>WPISANE W KOŃCOWY BUFOR • {scheduledShow.durationMinutes} MIN</small><strong>{scheduledShow.title}</strong><em>{scheduledShow.venue}</em></p></div><a href={scheduledShow.officialUrl} target="_blank" rel="noreferrer">Oficjalny opis <CaretRight size={17} /></a></article> : <p className="shows-muted">Na {planDayDateLabel(plan, selectedDay, true) || "wybrany dzień"} nie ma jeszcze pokazu, który zmieści się bez naruszania atrakcji, obiadu i godzinnego buforu wyjścia. Niczego nie wciskamy na siłę.</p>}
+          {availableShows.length > 0 ? <details className="show-list"><summary><span><strong>{availableShows.length} pokazów w oficjalnej rozpisce</strong><small>{planDayDateLabel(plan, selectedDay, true) || dateKey} · otwórz opisy, miejsca i godziny</small></span><CaretRight size={18} /></summary><div>{availableShows.map((show) => <article className="show-card" key={show.id}>{show.imageUrl && <img src={show.imageUrl} alt={`${show.title} — oficjalne zdjęcie Energylandii`} loading="lazy" />}<span><p><strong>{show.title}</strong><small>{show.venue} · {show.durationMinutes} min</small></p><p className="show-times">{show.times.join(" · ")}</p><p className="show-description">{show.description || "Oficjalny opis jest dostępny na stronie Energylandii."}</p><p className="show-links"><a href={show.url} target="_blank" rel="noreferrer">Opis Energylandii</a>{show.mapUrl && <a href={show.mapUrl} target="_blank" rel="noreferrer">Pokaż na mapie parku</a>}</p></span></article>)}</div></details> : <p className="shows-muted">Brak kompletnej rozpiski pokazów dla tego dnia w aktualnej oficjalnej migawce.</p>}
+        </>
+      )}
+      <p className="shows-note">{schedule?.source?.note || "Godziny mogą zmienić się operacyjnie — przed pokazem sprawdź również tablice na miejscu."}</p>
+    </section>
+  );
+}
+
+function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus, onRefreshWeather, showSchedule, showStatus, onRefreshShows, onToggleShows }) {
   const planHeadingRef = useRef(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
@@ -867,11 +910,14 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
           <p className="queue-snapshot">Kolejki: {queueSnapshot.label}{queueSnapshot.state === "stale" ? " — traktuj jako orientacyjne" : ""}.</p>
         </section>
 
+        <ShowSchedulePanel plan={plan} day={day} selectedDay={selectedDay} schedule={showSchedule} status={showStatus} onRefresh={onRefreshShows} onToggle={onToggleShows} />
+
         <section className="timeline-section" aria-labelledby="timeline-title">
           <div className="section-heading"><div><p className="eyebrow">PO KOLEI, BEZ CHAOSU</p><h2 id="timeline-title">Plan dnia</h2></div></div>
           <div className="timeline">
             {day.steps.map((step) => {
               if (step.kind === "meal") return <article className="timeline-meal" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="meal-icon"><ForkKnife size={20} weight="fill" /></div><div><em>PRZERWA</em><h3>{step.title}</h3><p>{step.description}</p></div></article>;
+              if (step.kind === "show") return <article className="timeline-show" key={step.id}><span className="timeline-time">{formatPlanTime(step.performanceStartMin)}</span><div className="show-icon"><CalendarBlank size={19} weight="fill" /></div><div><em>POKAZ NA ŻYWO • {step.durationMinutes} MIN</em><h3>{step.title}</h3><p>{step.venue} · {step.description}</p><a href={step.officialUrl} target="_blank" rel="noreferrer">Oficjalny opis <CaretRight size={14} /></a></div></article>;
               if (step.kind === "flex") return <article className="timeline-flex" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="flex-icon"><Sparkle size={19} weight="fill" /></div><div><em>ELASTYCZNIE DO {formatPlanTime(step.unplannedUntil ?? step.endMin)}</em><h3>{step.title}</h3><p>{step.description}</p></div></article>;
               if (step.kind === "ride") {
                 const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId];
@@ -890,7 +936,7 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
           <form className="email-box" onSubmit={openEmail}><label><span>Adres e-mail</span><input type="email" required placeholder="np. rodzina@example.com" value={email} onChange={(event) => setEmail(event.target.value)} /></label><button type="submit"><EnvelopeSimple size={20} weight="bold" /> Otwórz szkic e-maila</button><small>Nie wysyłamy ani nie zapisujemy adresu. Szkic pocztowy zawiera pełną rozpiskę i wpisane nazwy uczestników; PDF możesz zapisać powyżej i dołączyć samodzielnie.</small></form>
           <input ref={shareUrlRef} className="share-url" readOnly value={planUrl} aria-label="Link do planu" />
         </section>
-        <footer className="app-footer">Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji, OpenStreetMap i Queue-Times.</footer>
+        <footer className="app-footer">Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji i pokazów, OpenStreetMap oraz Queue-Times.</footer>
         {notice && <div className="toast" role="status">{notice}</div>}
       </main>
       {showPdfPreview && <PdfPreview plan={plan} planUrl={planUrl} onClose={() => setShowPdfPreview(false)} />}
@@ -912,11 +958,14 @@ export function App() {
   const [plan, setPlan] = useState(sharedPlan);
   const [queues, setQueues] = useState(null);
   const [queueStatus, setQueueStatus] = useState("loading");
+  const [showSchedule, setShowSchedule] = useState(null);
+  const [showStatus, setShowStatus] = useState("loading");
   const [generationError, setGenerationError] = useState("");
   const [weather, setWeather] = useState(null);
   const [weatherStatus, setWeatherStatus] = useState("loading");
   const [weatherClock, setWeatherClock] = useState(() => Date.now());
   const queuesRef = useRef(null);
+  const showScheduleRef = useRef(null);
   const weatherRef = useRef(null);
 
   useEffect(() => writeStored(DRAFT_KEY, profile), [profile]);
@@ -929,7 +978,7 @@ export function App() {
       setQueueStatus("ready");
       return data;
     } catch (error) {
-      if (error.name !== "AbortError") setQueueStatus(queuesRef.current ? "stale" : "error");
+      if (error?.name !== "AbortError") setQueueStatus(queuesRef.current ? "stale" : "error");
       return null;
     }
   }, []);
@@ -938,6 +987,25 @@ export function App() {
     refreshQueues(controller.signal);
     return () => controller.abort();
   }, [refreshQueues]);
+
+  const refreshShows = useCallback(async (signal) => {
+    setShowStatus("loading");
+    try {
+      const data = await loadShowSchedule(signal);
+      showScheduleRef.current = data;
+      setShowSchedule(data);
+      setShowStatus("ready");
+      return data;
+    } catch (error) {
+      if (error?.name !== "AbortError") setShowStatus(showScheduleRef.current ? "stale" : "error");
+      return null;
+    }
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    refreshShows(controller.signal);
+    return () => controller.abort();
+  }, [refreshShows]);
 
   const refreshWeather = useCallback(async () => {
     setWeatherStatus(weatherRef.current ? "refreshing" : "loading");
@@ -991,10 +1059,11 @@ export function App() {
 
   const weatherAssessment = useMemo(() => weather ? assessThreeDayWeather(weather, { now: new Date(weatherClock), carWalkMinutes: 30 }) : null, [weather, weatherClock]);
   const queueMapFor = useCallback((queueData) => Object.fromEntries(Object.values(ALL_ATTRACTIONS_BY_ID).map((attraction) => [attraction.id, queueForAttraction(attraction, queueData)])), []);
-  const buildPlanForProfile = useCallback((profileInput, queueData) => {
+  const buildPlanForProfile = useCallback((profileInput, queueData, scheduleData = showScheduleRef.current) => {
     const normalizedProfile = normalizeDraftProfile(profileInput, DEFAULT_PROFILE);
     const safeProfile = normalizedProfile.members.filter(isGuardian).length < 2 ? { ...normalizedProfile, splitPolicy: "never" } : normalizedProfile;
-    return buildUniversalPlan({ ...safeProfile, queueSnapshotAt: queueData?.updatedAt ?? null }, { queueById: queueMapFor(queueData) });
+    const basePlan = buildUniversalPlan({ ...safeProfile, queueSnapshotAt: queueData?.updatedAt ?? null }, { queueById: queueMapFor(queueData) });
+    return overlayShowsOnPlan(basePlan, scheduleData);
   }, [queueMapFor]);
 
   const generate = useCallback(() => {
@@ -1041,6 +1110,32 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "auto" });
   };
 
+  const refreshShowsAndReanalyze = useCallback(async () => {
+    const latestShows = await refreshShows();
+    if (!plan) return latestShows;
+    const nextPlan = buildPlanForProfile(plan.profile, queues, latestShows || showScheduleRef.current);
+    if (countPlanAttractions(nextPlan) === 0) return latestShows;
+    setPlan(nextPlan);
+    writeStored(PLAN_KEY, nextPlan);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    return latestShows;
+  }, [buildPlanForProfile, plan, queues, refreshShows]);
+
+  const toggleShowsInPlan = useCallback((includeShows) => {
+    const sourceProfile = plan?.profile || profile;
+    const nextProfile = normalizeDraftProfile({
+      ...sourceProfile,
+      entertainment: { ...(sourceProfile.entertainment || {}), includeShows },
+    }, DEFAULT_PROFILE);
+    setProfile(nextProfile);
+    if (!plan) return;
+    const nextPlan = buildPlanForProfile(nextProfile, queues, showScheduleRef.current);
+    if (countPlanAttractions(nextPlan) === 0) return;
+    setPlan(nextPlan);
+    writeStored(PLAN_KEY, nextPlan);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+  }, [buildPlanForProfile, plan, profile, queues]);
+
   if (screen === "entry") {
     return <EntryStart onWeather={() => setScreen("weather")} onPlan={() => prepareFreshPlan({}, "entry")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
   }
@@ -1053,5 +1148,5 @@ export function App() {
 
   if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={() => refreshQueues()} generationError={generationError} weatherAssessment={weatherAssessment} />;
   if (!plan) return null;
-  return <PlanView plan={plan} onReanalyze={reanalyze} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
+  return <PlanView plan={plan} onReanalyze={reanalyze} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} showSchedule={showSchedule} showStatus={showStatus} onRefreshShows={refreshShowsAndReanalyze} onToggleShows={toggleShowsInPlan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
 }

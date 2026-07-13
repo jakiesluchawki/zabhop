@@ -61,6 +61,10 @@ jobs:
         working-directory: apps/planer-energylandia
         run: npm test
 
+      - name: Odśwież oficjalny terminarz pokazów
+        working-directory: apps/planer-energylandia
+        run: npm run refresh:shows
+
       - name: Przekaż aktualne kolejki do nowego planera
         working-directory: .
         run: cp apps/pogoda-energylandia/public/live-queues.json apps/planer-energylandia/public/live-queues.json
