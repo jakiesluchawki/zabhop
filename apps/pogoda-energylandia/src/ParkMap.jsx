@@ -72,25 +72,56 @@ export function ParkMap({
       }).addTo(layer);
     }
 
-    attractions.forEach((attraction) => {
+    attractions.forEach((attraction, index) => {
       const point = coordinates(attraction);
       if (!point) return;
       const selected = attraction.id === selectedId;
       const primary = attraction.familyTier === "primary";
-      const markerColor = primary ? "#2f643e" : "#8a6818";
-      const markerFill = primary ? "#3f7f51" : "#e0b43d";
-      const marker = L.circleMarker(point, {
-        radius: selected ? 10 : 7,
-        color: selected ? "#fff7f1" : markerColor,
-        weight: selected ? 4 : 2,
-        fillColor: markerFill,
-        fillOpacity: 1,
+      const sequence = index + 1;
+      const size = selected ? 46 : 42;
+      const tierClass = primary ? "primary" : "secondary";
+      const accessibleName = `${sequence}. ${attraction.name}, ${
+        primary ? "zielony priorytet od 120 cm" : "żółta opcja dodatkowa"
+      }. Otwórz opis i nawigację.`;
+      const icon = L.divIcon({
+        className: [
+          "park-map-number-marker",
+          `park-map-number-marker--${tierClass}`,
+          selected ? "park-map-number-marker--selected" : "",
+        ]
+          .filter(Boolean)
+          .join(" "),
+        html: `<span class="park-map-number-marker__number" aria-hidden="true">${sequence}</span>`,
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+        tooltipAnchor: [0, -(size / 2 + 3)],
+      });
+      const marker = L.marker(point, {
+        icon,
+        keyboard: true,
+        title: accessibleName,
+        alt: accessibleName,
+        riseOnHover: true,
+        zIndexOffset: selected ? 1000 : primary ? 100 : 0,
       }).addTo(layer);
-      marker.bindTooltip(`${attraction.name} · ${primary ? "zielony 120+" : "żółty opcjonalny"}`, {
+      marker.bindTooltip(`${sequence}. ${attraction.name} · ${primary ? "zielony 120+" : "żółty opcjonalny"}`, {
         direction: "top",
-        offset: [0, -8],
       });
       marker.on("click", () => onSelect?.(attraction));
+
+      const markerElement = marker.getElement();
+      if (markerElement) {
+        markerElement.setAttribute("role", "button");
+        markerElement.setAttribute("aria-label", accessibleName);
+        markerElement.setAttribute("aria-haspopup", "dialog");
+        markerElement.setAttribute("data-attraction-id", attraction.id);
+        L.DomEvent.on(markerElement, "keydown", (event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          L.DomEvent.preventDefault(event);
+          L.DomEvent.stopPropagation(event);
+          onSelect?.(attraction);
+        });
+      }
     });
 
     if (showToilets) {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AppleLogo,
   ArrowClockwise,
   CaretRight,
   Check,
@@ -9,9 +10,11 @@ import {
   Crosshair,
   Database,
   Footprints,
+  GoogleLogo,
   Info,
   ListChecks,
   MapPin,
+  NavigationArrow,
   Sparkle,
   Timer,
   Toilet,
@@ -20,6 +23,8 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { ParkMap } from "./ParkMap.jsx";
+import { detailsForAttraction } from "./attractionDetails.js";
+import { createWalkingMapLinks } from "./mapNavigation.js";
 import {
   ATTRACTIONS,
   TOILETS,
@@ -169,6 +174,117 @@ function ParkSourcesSheet({ onClose }) {
   );
 }
 
+function MapNavigationSheet({ attraction, sequence, onClose }) {
+  const closeButtonRef = useRef(null);
+  const previousFocusRef = useRef(null);
+  const [imageFailed, setImageFailed] = useState(false);
+  const links = createWalkingMapLinks(attraction);
+  const details = detailsForAttraction(attraction);
+
+  useEffect(() => setImageFailed(false), [details.imageUrl]);
+
+  useEffect(() => {
+    previousFocusRef.current = document.activeElement;
+    closeButtonRef.current?.focus();
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("keydown", closeOnEscape);
+      previousFocusRef.current?.focus?.();
+    };
+  }, [onClose]);
+
+  if (!links) return null;
+
+  const primary = attraction.familyTier === "primary";
+  const tierLabel = primary ? "zielony priorytet 120+" : "żółta opcja dodatkowa";
+  return (
+    <div className="sheet-layer">
+      <button className="sheet-backdrop" type="button" aria-label="Zamknij szczegóły atrakcji" onClick={onClose} />
+      <section className="bottom-sheet map-navigation-sheet" role="dialog" aria-modal="true" aria-labelledby="map-navigation-title" aria-describedby="attraction-summary map-navigation-note">
+        <div className="sheet-handle" aria-hidden="true" />
+        <header className="sheet-header">
+          <div>
+            <p className="eyebrow">ATRAKCJA {sequence} • {zoneName(attraction.zone).toUpperCase()}</p>
+            <h2 id="map-navigation-title">{links.destinationName}</h2>
+          </div>
+          <button ref={closeButtonRef} className="icon-button" type="button" onClick={onClose} aria-label="Zamknij">
+            <X size={22} weight="bold" />
+          </button>
+        </header>
+
+        {!imageFailed && details.imageUrl ? (
+          <figure className="attraction-photo">
+            <img
+              src={details.imageUrl}
+              alt={`${links.destinationName} — zdjęcie Energylandii`}
+              loading="eager"
+              decoding="async"
+              onError={() => setImageFailed(true)}
+            />
+            <figcaption>OFICJALNE ZDJĘCIE • ENERGYLANDIA</figcaption>
+          </figure>
+        ) : (
+          <div className="attraction-photo-fallback" role="img" aria-label={`Brak podglądu zdjęcia atrakcji ${links.destinationName}`}>
+            <span>Zdjęcie chwilowo niedostępne</span>
+          </div>
+        )}
+
+        <div className={`attraction-tier-line tier-${primary ? "primary" : "secondary"}`}>
+          <span className="navigation-destination-number" aria-hidden="true">{sequence}</span>
+          <strong>{tierLabel}</strong>
+          <span>{restrictionLabel(attraction)}</span>
+        </div>
+
+        <p className="attraction-summary" id="attraction-summary">{details.summary}</p>
+
+        <div className="attraction-facts" aria-label="Najważniejsze cechy atrakcji">
+          <span>{intensityLabel(attraction.intensity)}</span>
+          <span>{attraction.wet ? "można zmoknąć" : "bez wody"}</span>
+          <span>około {attraction.durationMinutes || 3} min</span>
+        </div>
+
+        <a className="attraction-source-link" href={attraction.sourceUrl} target="_blank" rel="noopener noreferrer">
+          <span><strong>Pełny opis i galeria</strong><small>oficjalna strona Energylandii</small></span>
+          <CaretRight size={18} aria-hidden="true" />
+        </a>
+
+        <div className="navigation-section-heading">
+          <p className="eyebrow">PROWADŹ NAS</p>
+          <small>pieszo z pozycji telefonu</small>
+        </div>
+
+        <div className="map-provider-grid" aria-label={`Wybierz mapę do ${links.destinationName}`}>
+          <a
+            className="map-provider-link apple"
+            href={links.appleMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Otwórz pieszą trasę do ${links.destinationName} w Apple Maps, w nowej karcie lub aplikacji`}
+          >
+            <AppleLogo size={26} weight="fill" aria-hidden="true" />
+            <span><strong>Apple Maps</strong><small>prowadź pieszo</small></span>
+          </a>
+          <a
+            className="map-provider-link google"
+            href={links.googleMapsUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Otwórz pieszą trasę do ${links.destinationName} w Google Maps, w nowej karcie lub aplikacji`}
+          >
+            <GoogleLogo size={26} weight="bold" aria-hidden="true" />
+            <span><strong>Google Maps</strong><small>prowadź pieszo</small></span>
+          </a>
+        </div>
+
+        <p className="sheet-note" id="map-navigation-note">Start ustali telefon. Cel to punkt atrakcji z OpenStreetMap, nie zawsze wejście do kolejki — ostatnie metry sprawdźcie na oznaczeniach parku.</p>
+      </section>
+    </div>
+  );
+}
+
 export function ParkView({ weather }) {
   const [completedIds, setCompletedIds] = useState(() => {
     const stored = loadStored(COMPLETED_KEY, []);
@@ -183,6 +299,7 @@ export function ParkView({ weather }) {
   const [focus, setFocus] = useState(null);
   const [mapMode, setMapMode] = useState("route");
   const [sheet, setSheet] = useState(null);
+  const [navigationStop, setNavigationStop] = useState(null);
   const [lastToiletAt, setLastToiletAt] = useState(() => Number(window.localStorage.getItem(TOILET_KEY)) || Date.now());
   const watchRef = useRef(null);
 
@@ -286,19 +403,24 @@ export function ParkView({ weather }) {
     setCompletedIds((current) => current.includes(id) ? current : [...current, id]);
     setSelectedId(null);
     setFocus(null);
+    setNavigationStop(null);
   }, []);
 
   const selectAttraction = useCallback((attraction) => {
     setMapMode("route");
     setSelectedId(attraction.id);
     setFocus(attraction);
+    setNavigationStop(attraction);
   }, []);
+
+  const closeNavigation = useCallback(() => setNavigationStop(null), []);
 
   const showNearestToilet = useCallback(() => {
     if (!nearest.toilet) return;
     setMapMode("toilets");
     setSelectedId(nearest.toilet.id);
     setFocus(nearest.toilet);
+    setNavigationStop(null);
   }, [nearest]);
 
   const confirmToilet = useCallback(() => {
@@ -310,6 +432,9 @@ export function ParkView({ weather }) {
   const primaryRoute = route.filter((stop) => stop.familyTier === "primary");
   const secondaryRoute = route.filter((stop) => stop.familyTier === "secondary");
   const displayRoute = [...primaryRoute, ...secondaryRoute];
+  const navigationSequence = navigationStop
+    ? displayRoute.findIndex((stop) => stop.id === navigationStop.id) + 1
+    : 0;
 
   const renderRouteRow = (stop, index) => {
     const queue = queueForAttraction(stop, queues);
@@ -318,6 +443,8 @@ export function ParkView({ weather }) {
         className={`tier-${stop.familyTier} ${stop.id === selectedStop?.id ? "selected" : ""}`}
         type="button"
         key={stop.id}
+        data-attraction-id={stop.id}
+        aria-haspopup="dialog"
         onClick={() => selectAttraction(stop)}
       >
         <span className="route-number">{index + 1}</span>
@@ -380,8 +507,8 @@ export function ParkView({ weather }) {
               {realWait > (nextQueue?.waitTime || 0) && <span><WarningCircle size={18} weight="duotone" /> realnie ~{realWait} min</span>}
             </div>
             <div className="next-stop-actions">
-              <button className="button button-secondary" type="button" onClick={() => { setSelectedId(nextStop.id); setFocus(nextStop); }}>
-                <MapPin size={20} weight="bold" /> Na mapie
+              <button className="button button-secondary" type="button" aria-haspopup="dialog" onClick={() => selectAttraction(nextStop)}>
+                <NavigationArrow size={20} weight="fill" /> Opis i trasa
               </button>
               <button className="button button-primary" type="button" onClick={() => markDone(nextStop.id)}>
                 <Check size={20} weight="bold" /> Zrobione
@@ -416,10 +543,11 @@ export function ParkView({ weather }) {
             toilets={TOILETS}
             position={position}
             selectedId={selectedId}
-            focus={focus || selectedStop}
+            focus={focus}
             showToilets={mapMode === "toilets"}
             onSelect={selectAttraction}
           />
+          <p className="map-help"><MapPin size={14} weight="fill" aria-hidden="true" /> Dotknij numeru lub pozycji na liście, żeby zobaczyć opis, zdjęcie i prowadzenie.</p>
           <div className="map-actions">
             <button type="button" onClick={locate} className={locationStatus === "ready" ? "located" : ""}>
               <Crosshair size={18} weight="bold" />
@@ -455,7 +583,7 @@ export function ParkView({ weather }) {
           )}
         </section>
 
-        <button className="park-source-summary" type="button" onClick={() => setSheet("sources")}>
+        <button className="park-source-summary" type="button" onClick={() => { setNavigationStop(null); setSheet("sources"); }}>
           <Database size={20} weight="duotone" aria-hidden="true" />
           <span><strong>Dane oficjalne + mapa + kolejki</strong><small>{queueError || (queues ? `kolejki ${formatFreshness(queues.updatedAt)}` : "łączę źródła")}</small></span>
           <ArrowClockwise size={17} className={queueRefreshing ? "spin" : ""} aria-hidden="true" />
@@ -469,6 +597,13 @@ export function ParkView({ weather }) {
       </div>
 
       {sheet === "sources" && <ParkSourcesSheet onClose={() => setSheet(null)} />}
+      {navigationStop && navigationSequence > 0 && (
+        <MapNavigationSheet
+          attraction={navigationStop}
+          sequence={navigationSequence}
+          onClose={closeNavigation}
+        />
+      )}
     </>
   );
 }

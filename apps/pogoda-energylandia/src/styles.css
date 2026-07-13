@@ -750,6 +750,43 @@ footer p { margin: 0; font-size: 9px; line-height: 1.35; }
 .park-map .leaflet-control-attribution { max-width: 76%; font-size: 7px; background: rgba(255,247,241,.78); }
 .park-map .leaflet-control-zoom a { color: var(--olive); background: rgba(255,247,241,.92); }
 .park-map .leaflet-tooltip { border: 1px solid var(--line); border-radius: 8px; color: var(--olive); background: var(--paper-warm); box-shadow: 0 5px 18px rgba(73,57,47,.14); font-family: "Roobert", sans-serif; font-size: 10px; font-weight: 700; }
+.park-map-number-marker { border: 0; display: grid; place-items: center; background: transparent; }
+.park-map-number-marker__number {
+  width: 30px;
+  height: 30px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 5px 14px rgba(73, 57, 47, .24);
+  font-family: "Roobert", sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  transition: transform .16s ease, box-shadow .16s ease;
+}
+.park-map-number-marker--primary { color: #fff7f1; }
+.park-map-number-marker--primary .park-map-number-marker__number { border-color: #2f643e; background: var(--green); }
+.park-map-number-marker--secondary { color: #4f431a; }
+.park-map-number-marker--secondary .park-map-number-marker__number { border-color: #8a6818; background: var(--yellow); }
+.park-map-number-marker--selected .park-map-number-marker__number {
+  width: 38px;
+  height: 38px;
+  border-width: 4px;
+  border-color: #fff7f1;
+  box-shadow: 0 0 0 2px var(--violet), 0 8px 20px rgba(73, 57, 47, .3);
+  transform: scale(1.04);
+}
+.map-help {
+  margin: 7px 2px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 5px;
+  font-size: 9px;
+  line-height: 1.35;
+  opacity: .7;
+}
+.map-help svg { flex: 0 0 auto; color: var(--violet); }
 .map-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
 .map-actions button {
   min-height: 42px;
@@ -873,6 +910,130 @@ footer p { margin: 0; font-size: 9px; line-height: 1.35; }
 .profile-safety-note p { margin: 0; font-size: 10px; line-height: 1.4; }
 .sheet-done { width: 100%; margin-top: 14px; }
 .park-sources-sheet .source-row { grid-template-columns: 24px 1fr 18px; }
+
+.map-navigation-sheet { max-height: 88%; overscroll-behavior: contain; }
+.map-navigation-sheet .sheet-header h2 { max-width: 268px; font-size: 30px; }
+.attraction-photo {
+  position: relative;
+  width: 100%;
+  height: 168px;
+  overflow: hidden;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  background: var(--mist);
+  box-shadow: 0 10px 24px rgba(73, 57, 47, .12);
+}
+.attraction-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.attraction-photo figcaption {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  border: 1px solid rgba(255, 247, 241, .5);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: var(--paper-warm);
+  background: rgba(73, 57, 47, .68);
+  backdrop-filter: blur(5px);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+.attraction-photo-fallback {
+  height: 118px;
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 17px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--mist) 58%, var(--paper-warm));
+  font-size: 10px;
+  font-weight: 700;
+  opacity: .72;
+}
+.attraction-tier-line {
+  min-height: 60px;
+  margin-top: 9px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 38px 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 9px;
+  background: rgba(255, 247, 241, .42);
+}
+.attraction-tier-line.tier-primary { border-color: color-mix(in srgb, var(--green) 48%, transparent); }
+.attraction-tier-line.tier-secondary { border-color: color-mix(in srgb, var(--yellow-dark) 46%, transparent); }
+.navigation-destination-number {
+  grid-row: 1 / 3;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--paper-warm);
+  background: var(--green);
+  font-size: 13px;
+  font-weight: 700;
+}
+.attraction-tier-line.tier-secondary .navigation-destination-number { color: #4f431a; background: var(--yellow); }
+.attraction-tier-line strong { align-self: end; font-size: 11px; line-height: 1.1; }
+.attraction-tier-line > span:last-child { align-self: start; margin-top: 3px; font-size: 9px; opacity: .7; }
+.attraction-summary { margin: 11px 2px 9px; font-size: 13px; line-height: 1.43; }
+.attraction-facts { display: flex; flex-wrap: wrap; gap: 5px; }
+.attraction-facts span {
+  min-height: 27px;
+  border: 1px solid var(--soft-line);
+  border-radius: 999px;
+  padding: 6px 8px 5px;
+  background: rgba(255, 225, 235, .26);
+  font-size: 8px;
+  font-weight: 700;
+}
+.attraction-source-link {
+  min-height: 49px;
+  margin-top: 8px;
+  border-top: 1px solid var(--soft-line);
+  border-bottom: 1px solid var(--soft-line);
+  padding: 7px 2px;
+  display: grid;
+  grid-template-columns: 1fr 18px;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+.attraction-source-link strong, .attraction-source-link small { display: block; }
+.attraction-source-link strong { font-size: 10px; }
+.attraction-source-link small { margin-top: 3px; font-size: 8px; opacity: .68; }
+.navigation-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 8px; margin-top: 13px; }
+.navigation-section-heading .eyebrow { margin: 0; }
+.navigation-section-heading small { font-size: 8px; opacity: .68; }
+.map-provider-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 10px; }
+.map-provider-link {
+  min-height: 64px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  background: rgba(255, 247, 241, .55);
+  text-decoration: none;
+  box-shadow: 0 8px 18px rgba(73, 57, 47, .07);
+}
+.map-provider-link.apple { border-color: color-mix(in srgb, var(--olive) 42%, transparent); }
+.map-provider-link.google { border-color: color-mix(in srgb, var(--violet) 45%, transparent); }
+.map-provider-link.google > svg { color: var(--violet); }
+.map-provider-link strong, .map-provider-link small { display: block; }
+.map-provider-link strong { font-size: 12px; }
+.map-provider-link small { margin-top: 4px; font-size: 8px; opacity: .68; }
+.map-provider-link:active { transform: scale(.985); }
+
 
 .spin { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
