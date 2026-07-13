@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.DS_Store
+.npm-cache/
+.npmrc
+
+# Local agent notes are not part of the public app.
+AGENTS.md

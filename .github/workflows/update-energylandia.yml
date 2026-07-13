@@ -1,0 +1,82 @@
+name: Update Energylandia navigator
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/pogoda-energylandia/**"
+      - "pogoda-energylandia/**"
+      - ".github/workflows/update-energylandia.yml"
+  workflow_dispatch:
+  schedule:
+    - cron: "*/10 * * * *"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/pogoda-energylandia
+    steps:
+      - name: Pobierz repozytorium
+        uses: actions/checkout@v4
+
+      - name: Skonfiguruj Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/pogoda-energylandia/package-lock.json
+
+      - name: Zainstaluj zależności
+        run: npm ci
+
+      - name: Uruchom testy
+        run: npm test
+
+      - name: Pobierz aktualne kolejki
+        run: npm run refresh:queues
+
+      - name: Zbuduj aplikację
+        run: npm run build
+
+      - name: Złóż cały serwis Pages
+        working-directory: .
+        run: |
+          mkdir -p _site
+          rsync -a \
+            --exclude .git \
+            --exclude .github \
+            --exclude apps \
+            --exclude _site \
+            ./ _site/
+          rsync -a --delete apps/pogoda-energylandia/dist/ _site/pogoda-energylandia/
+
+      - name: Skonfiguruj GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Przygotuj artefakt Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Opublikuj GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
