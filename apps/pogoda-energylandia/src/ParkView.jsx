@@ -12,11 +12,10 @@ import {
   Info,
   ListChecks,
   MapPin,
-  Ruler,
-  SlidersHorizontal,
   Sparkle,
   Timer,
   Toilet,
+  UsersThree,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -28,8 +27,10 @@ import {
 } from "./parkData.js";
 import {
   buildRoute,
+  classifyAttractionForFamily,
   chooseNextStop,
   distanceMeters,
+  FAMILY_PROFILE,
   findNearestToilet,
   walkingMinutes,
 } from "./parkLogic.js";
@@ -41,16 +42,13 @@ import {
   QUEUE_SOURCE_URL,
 } from "./queues.js";
 
-const PROFILE_KEY = "pogodapark-family-profile-v1";
 const COMPLETED_KEY = "pogodapark-completed-v1";
 const TOILET_KEY = "pogodapark-last-toilet-v1";
-const HEIGHT_OPTIONS = [
-  { value: 0, label: "Nie wiem" },
-  { value: 100, label: "100–109" },
-  { value: 110, label: "110–119" },
-  { value: 120, label: "120–129" },
-  { value: 130, label: "130+" },
-];
+const FAMILY_ATTRACTION_IDS = new Set(
+  ATTRACTIONS
+    .filter((attraction) => classifyAttractionForFamily(attraction) !== "excluded")
+    .map((attraction) => attraction.id),
+);
 
 function loadStored(key, fallback) {
   try {
@@ -114,50 +112,6 @@ function weatherNow(weather) {
   };
 }
 
-function ProfileSheet({ heights, onHeightChange, onClose }) {
-  return (
-    <div className="sheet-layer">
-      <button className="sheet-backdrop" type="button" aria-label="Zamknij profil" onClick={onClose} />
-      <section className="bottom-sheet profile-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-title">
-        <div className="sheet-handle" aria-hidden="true" />
-        <header className="sheet-header">
-          <div>
-            <p className="eyebrow">2 DOROSŁYCH • DZIECI PO 6 LAT</p>
-            <h2 id="profile-title">Wzrost zmienia trasę</h2>
-          </div>
-          <button className="icon-button" type="button" onClick={onClose} aria-label="Zamknij">
-            <X size={22} weight="bold" />
-          </button>
-        </header>
-        {[0, 1].map((child) => (
-          <fieldset className="height-field" key={child}>
-            <legend>Dziecko {child + 1} — wzrost w butach</legend>
-            <div className="height-options">
-              {HEIGHT_OPTIONS.map((option) => (
-                <button
-                  type="button"
-                  key={option.value}
-                  className={heights[child] === option.value ? "selected" : ""}
-                  onClick={() => onHeightChange(child, option.value)}
-                >
-                  {option.label}{option.value ? " cm" : ""}
-                </button>
-              ))}
-            </div>
-          </fieldset>
-        ))}
-        <div className="profile-safety-note">
-          <Ruler size={22} weight="duotone" aria-hidden="true" />
-          <p><strong>Zmierzcie oboje przy wejściu.</strong> Trasa wspólna zawsze używa wzrostu niższego dziecka; regulamin i decyzja obsługi mają pierwszeństwo.</p>
-        </div>
-        <button className="button button-primary sheet-done" type="button" onClick={onClose}>
-          Ułóż bezpieczną trasę
-        </button>
-      </section>
-    </div>
-  );
-}
-
 function ParkSourcesSheet({ onClose }) {
   const sources = [
     {
@@ -216,8 +170,10 @@ function ParkSourcesSheet({ onClose }) {
 }
 
 export function ParkView({ weather }) {
-  const [heights, setHeights] = useState(() => loadStored(PROFILE_KEY, [0, 0]));
-  const [completedIds, setCompletedIds] = useState(() => loadStored(COMPLETED_KEY, []));
+  const [completedIds, setCompletedIds] = useState(() => {
+    const stored = loadStored(COMPLETED_KEY, []);
+    return Array.isArray(stored) ? stored.filter((id) => FAMILY_ATTRACTION_IDS.has(id)) : [];
+  });
   const [queues, setQueues] = useState(null);
   const [queueError, setQueueError] = useState("");
   const [queueRefreshing, setQueueRefreshing] = useState(false);
@@ -230,12 +186,8 @@ export function ParkView({ weather }) {
   const [lastToiletAt, setLastToiletAt] = useState(() => Number(window.localStorage.getItem(TOILET_KEY)) || Date.now());
   const watchRef = useRef(null);
 
-  const familyHeight = heights.some((height) => !height) ? 0 : Math.min(...heights);
+  const familyHeight = FAMILY_PROFILE.safeHeightCm;
   const weatherSummary = useMemo(() => weatherNow(weather), [weather]);
-
-  useEffect(() => {
-    window.localStorage.setItem(PROFILE_KEY, JSON.stringify(heights));
-  }, [heights]);
 
   useEffect(() => {
     window.localStorage.setItem(COMPLETED_KEY, JSON.stringify(completedIds));
@@ -277,7 +229,7 @@ export function ParkView({ weather }) {
 
   const route = useMemo(() => buildRoute({
     height: familyHeight,
-    age: 6,
+    age: FAMILY_PROFILE.childAge,
     completedIds,
     queueById,
   }), [familyHeight, completedIds, queueById]);
@@ -285,10 +237,10 @@ export function ParkView({ weather }) {
   const nextStop = useMemo(() => chooseNextStop({
     position,
     height: familyHeight,
-    age: 6,
+    age: FAMILY_PROFILE.childAge,
     completedIds,
     queueById,
-  }) || route.find((stop) => !completedIds.includes(stop.id)) || null, [position, familyHeight, completedIds, queueById, route]);
+  }) || route.find((stop) => stop.familyTier === "primary") || route[0] || null, [position, familyHeight, completedIds, queueById, route]);
 
   const selectedStop = route.find((stop) => stop.id === selectedId)
     || ATTRACTIONS.find((stop) => stop.id === selectedId)
@@ -355,16 +307,26 @@ export function ParkView({ weather }) {
     window.localStorage.setItem(TOILET_KEY, String(now));
   }, []);
 
-  const updateHeight = useCallback((child, value) => {
-    setHeights((current) => current.map((height, index) => index === child ? value : height));
-    setCompletedIds([]);
-    setSelectedId(null);
-  }, []);
+  const primaryRoute = route.filter((stop) => stop.familyTier === "primary");
+  const secondaryRoute = route.filter((stop) => stop.familyTier === "secondary");
+  const displayRoute = [...primaryRoute, ...secondaryRoute];
 
-  const remaining = route.filter((stop) => !completedIds.includes(stop.id));
-  const profileText = familyHeight
-    ? `niższe dziecko ${familyHeight}–${familyHeight === 130 ? "∞" : familyHeight + 9} cm`
-    : "wzrost jeszcze niepotwierdzony";
+  const renderRouteRow = (stop, index) => {
+    const queue = queueForAttraction(stop, queues);
+    return (
+      <button
+        className={`tier-${stop.familyTier} ${stop.id === selectedStop?.id ? "selected" : ""}`}
+        type="button"
+        key={stop.id}
+        onClick={() => selectAttraction(stop)}
+      >
+        <span className="route-number">{index + 1}</span>
+        <span className="route-copy"><strong>{stop.name}</strong><small>{zoneName(stop.zone)} • {restrictionLabel(stop)}</small></span>
+        <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""}`}>{queueLabel(queue)}</span>
+        <CaretRight size={17} aria-hidden="true" />
+      </button>
+    );
+  };
 
   return (
     <>
@@ -374,23 +336,18 @@ export function ParkView({ weather }) {
             <p className="eyebrow">ENERGYLANDIA • NA MIEJSCU</p>
             <h1>Wasza trasa</h1>
           </div>
-          <button className="round-action" type="button" onClick={() => setSheet("profile")} aria-label="Ustaw profil rodziny">
-            <SlidersHorizontal size={21} weight="bold" />
-          </button>
+          <span className="round-status" aria-label="Stały profil 120 do 129 centymetrów">120+</span>
         </header>
 
-        <button className="family-profile-bar" type="button" onClick={() => setSheet("profile")}>
-          <span><strong>Ja + Adam + 2 × 6 lat</strong><small>{profileText}</small></span>
-          <CaretRight size={18} aria-hidden="true" />
-        </button>
+        <div className="family-profile-bar fixed">
+          <UsersThree size={22} weight="duotone" aria-hidden="true" />
+          <span><strong>Ja + Adam + 2 × 6 lat</strong><small>stały profil dzieci: {FAMILY_PROFILE.heightRangeLabel}</small></span>
+        </div>
 
-        {!familyHeight && (
-          <button className="height-alert" type="button" onClick={() => setSheet("profile")}>
-            <Ruler size={22} weight="duotone" aria-hidden="true" />
-            <span><strong>Najpierw potwierdźcie wzrost</strong><small>Na razie pokazuję tylko rodzinne atrakcje dostępne wiekiem z opiekunem.</small></span>
-            <CaretRight size={17} aria-hidden="true" />
-          </button>
-        )}
+        <div className="ride-priority-legend" aria-label="Legenda priorytetu atrakcji">
+          <span className="primary"><i /> <strong>Zielone</strong> próg 120 cm</span>
+          <span className="secondary"><i /> <strong>Żółte</strong> 100–110 cm lub wg wieku</span>
+        </div>
 
         {weatherSummary && (
           <div className={`park-weather ${weatherSummary.rainSoon ? "rain" : ""}`}>
@@ -403,9 +360,9 @@ export function ParkView({ weather }) {
         )}
 
         {nextStop ? (
-          <section className="next-stop-card" aria-labelledby="next-stop-title">
+          <section className={`next-stop-card tier-${nextStop.familyTier}`} aria-labelledby="next-stop-title">
             <div className="next-stop-kicker">
-              <span><Sparkle size={15} weight="fill" /> TERAZ NAJLEPIEJ</span>
+              <span><Sparkle size={15} weight="fill" /> {nextStop.familyTier === "primary" ? "ZIELONY PRIORYTET" : "ŻÓŁTA OPCJA"}</span>
               <em>{zoneName(nextStop.zone)}</em>
             </div>
             <div className="next-stop-heading">
@@ -455,7 +412,7 @@ export function ParkView({ weather }) {
             </div>
           </div>
           <ParkMap
-            attractions={remaining}
+            attractions={displayRoute}
             toilets={TOILETS}
             position={position}
             selectedId={selectedId}
@@ -481,20 +438,21 @@ export function ParkView({ weather }) {
             <div><p className="eyebrow">OD TYŁU DO WYJŚCIA</p><h2 id="route-title">Plan bez biegania</h2></div>
             <span className="route-progress">{completedIds.length}/{route.length + completedIds.length}</span>
           </div>
-          <p className="route-intro">Sweet Valley → Aqualantis → Smoczy Gród → Strefa Familijna. Mocniejszą jazdę przeplatamy spokojnym resetem.</p>
-          <div className="route-list">
-            {route.map((stop, index) => {
-              const queue = queueForAttraction(stop, queues);
-              return (
-                <button className={stop.id === selectedStop?.id ? "selected" : ""} type="button" key={stop.id} onClick={() => selectAttraction(stop)}>
-                  <span className="route-number">{index + 1}</span>
-                  <span className="route-copy"><strong>{stop.name}</strong><small>{zoneName(stop.zone)} • {restrictionLabel(stop)}</small></span>
-                  <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""}`}>{queueLabel(queue)}</span>
-                  <CaretRight size={17} aria-hidden="true" />
-                </button>
-              );
-            })}
-          </div>
+          <p className="route-intro">Najpierw zielone hity od 120 cm: Sweet Valley → Aqualantis → Formuła → Strefa Familijna. Żółte traktujcie jako zapas po drodze.</p>
+
+          {primaryRoute.length > 0 && (
+            <div className="route-group primary">
+              <div className="route-group-heading"><span><i /> ZIELONE • GŁÓWNY PLAN</span><strong>{primaryRoute.length}</strong></div>
+              <div className="route-list">{primaryRoute.map((stop, index) => renderRouteRow(stop, index))}</div>
+            </div>
+          )}
+
+          {secondaryRoute.length > 0 && (
+            <div className="route-group secondary">
+              <div className="route-group-heading"><span><i /> ŻÓŁTE • JEŚLI MACIE CZAS</span><strong>{secondaryRoute.length}</strong></div>
+              <div className="route-list">{secondaryRoute.map((stop, index) => renderRouteRow(stop, primaryRoute.length + index))}</div>
+            </div>
+          )}
         </section>
 
         <button className="park-source-summary" type="button" onClick={() => setSheet("sources")}>
@@ -510,7 +468,6 @@ export function ParkView({ weather }) {
         </footer>
       </div>
 
-      {sheet === "profile" && <ProfileSheet heights={heights} onHeightChange={updateHeight} onClose={() => setSheet(null)} />}
       {sheet === "sources" && <ParkSourcesSheet onClose={() => setSheet(null)} />}
     </>
   );

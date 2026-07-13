@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>QA — Energylandia na miejscu</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 16px;
+        background: #deddd4;
+        color: #3f4022;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      h1, h2 { margin: 0 0 18px; }
+      h1 { font-size: 24px; }
+      h2 { margin-top: 42px; font-size: 18px; }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 190px);
+        gap: 12px;
+        align-items: start;
+      }
+      figure { margin: 0; }
+      figcaption {
+        margin: 0 0 9px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+      }
+      img {
+        display: block;
+        width: 190px;
+        border-radius: 14px;
+        box-shadow: 0 16px 42px rgba(52, 48, 36, .18);
+      }
+      img.full {
+        height: 411px;
+        object-fit: cover;
+        object-position: top;
+      }
+      .crop {
+        width: 190px;
+        height: 240px;
+        overflow: hidden;
+        border-radius: 14px;
+        box-shadow: 0 16px 42px rgba(52, 48, 36, .18);
+      }
+      .crop img { border-radius: 0; box-shadow: none; }
+      .note {
+        max-width: 594px;
+        margin-top: 24px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Porównanie pełnego widoku • 390 × 844</h1>
+    <div class="grid">
+      <figure>
+        <figcaption>Źródło języka — Gdzie Żabka</figcaption>
+        <img class="full" src="./reference-gdzie-zaba-mobile.png" alt="Referencja Gdzie Żabka" />
+      </figure>
+      <figure>
+        <figcaption>Źródło języka — Chmurnik</figcaption>
+        <img class="full" src="./reference-chmurnik-mobile.png" alt="Referencja Chmurnik" />
+      </figure>
+      <figure>
+        <figcaption>Implementacja — stały profil 120+</figcaption>
+        <img class="full" src="./park-priority-mobile-390x844.png" alt="Implementacja stałego profilu 120 plus" />
+      </figure>
+    </div>
+
+    <h2>Porównanie skupione — hierarchia, filc, akcje i mapa</h2>
+    <div class="grid">
+      <figure>
+        <figcaption>Źródło — górna hierarchia</figcaption>
+        <div class="crop"><img src="./reference-gdzie-zaba-mobile.png" alt="Detal referencji" /></div>
+      </figure>
+      <figure>
+        <figcaption>Implementacja — górna hierarchia</figcaption>
+        <div class="crop"><img src="./park-priority-mobile-390x844.png" alt="Detal implementacji" /></div>
+      </figure>
+      <figure>
+        <figcaption>Implementacja — zielone i żółte</figcaption>
+        <div class="crop"><img src="./park-priority-groups-mobile-390x844.png" alt="Zielona i żółta część trasy" /></div>
+      </figure>
+    </div>
+    <p class="note">Wspólne cechy oceniane: papierowo-filcowa faktura, oliwkowa typografia, fiolet jako kolor działania, duże nagłówki szeryfowe, obłe karty, czytelna dolna nawigacja i kompaktowa gęstość treści na telefonie.</p>
+  </body>
+</html>

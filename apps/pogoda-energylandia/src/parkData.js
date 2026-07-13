@@ -3,20 +3,20 @@
 // or useful ride centroids from the local OpenStreetMap extract
 // (tmp/energylandia.osm, ODbL).
 
-export const HEIGHT_PROFILES = Object.freeze([100, 110, 120, 130]);
-
 export const ZONES = Object.freeze({
   "sweet-valley": Object.freeze({ id: "sweet-valley", name: "Sweet Valley", routeOrder: 0 }),
   aqualantis: Object.freeze({ id: "aqualantis", name: "Aqualantis", routeOrder: 1 }),
   "dragon-zone": Object.freeze({ id: "dragon-zone", name: "Smoczy Gród", routeOrder: 2 }),
-  "family-zone": Object.freeze({ id: "family-zone", name: "Strefa Familijna", routeOrder: 3 }),
-  fairyland: Object.freeze({ id: "fairyland", name: "Bajkolandia", routeOrder: 4 }),
+  "extreme-zone": Object.freeze({ id: "extreme-zone", name: "Strefa Ekstremalna", routeOrder: 3 }),
+  "family-zone": Object.freeze({ id: "family-zone", name: "Strefa Familijna", routeOrder: 4 }),
+  fairyland: Object.freeze({ id: "fairyland", name: "Bajkolandia", routeOrder: 5 }),
 });
 
 export const DEFAULT_ZONE_ORDER = Object.freeze([
   "sweet-valley",
   "aqualantis",
   "dragon-zone",
+  "extreme-zone",
   "family-zone",
   "fairyland",
 ]);
@@ -108,6 +108,21 @@ export const ATTRACTIONS = Object.freeze([
     sourceUrl: official("sweet-valley/choco-chip-creek"),
   }),
   attraction({
+    id: "abyssus",
+    name: "Abyssus",
+    osmId: "node/8889371834",
+    zone: "aqualantis",
+    location: Object.freeze({ lat: 49.999943, lon: 19.4003237 }),
+    restrictions: { minHeightWithGuardian: 120, soloHeight: 140 },
+    routeOrder: 35,
+    priority: 120,
+    intensity: "high",
+    wet: false,
+    durationMinutes: 4,
+    queueAliases: ["Abyssus"],
+    sourceUrl: official("aqualantis/abyssus"),
+  }),
+  attraction({
     id: "light-explorers",
     name: "EKIPA Light Explorers",
     osmId: "node/8931281684",
@@ -184,6 +199,36 @@ export const ATTRACTIONS = Object.freeze([
     durationMinutes: 10,
     queueAliases: ["Wonder Wheel 208"],
     sourceUrl: official("smoczy-grod/wonder-wheel"),
+  }),
+  attraction({
+    id: "formula",
+    name: "Formuła",
+    osmId: "node/7338922202",
+    zone: "extreme-zone",
+    location: Object.freeze({ lat: 49.9995868, lon: 19.4056038 }),
+    restrictions: { minHeightWithGuardian: 120, soloHeight: 140 },
+    routeOrder: 85,
+    priority: 116,
+    intensity: "high",
+    wet: false,
+    durationMinutes: 3,
+    queueAliases: ["Moya Formula Rc", "Formula Rc", "Formuła"],
+    sourceUrl: official("strefa-ekstremalna/formula-roller-coaster"),
+  }),
+  attraction({
+    id: "anaconda",
+    name: "Anaconda",
+    osmId: "way/666524712",
+    zone: "family-zone",
+    location: Object.freeze({ lat: 50.0004916, lon: 19.4055219 }),
+    restrictions: { minHeightWithGuardian: 120, soloHeight: 140 },
+    routeOrder: 85,
+    priority: 112,
+    intensity: "high",
+    wet: true,
+    durationMinutes: 5,
+    queueAliases: ["Anaconda", "Fast Pass Anaconda"],
+    sourceUrl: official("strefa-familijna/anaconda"),
   }),
   attraction({
     id: "rmf-dragon",
