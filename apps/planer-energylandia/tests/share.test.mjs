@@ -5,6 +5,7 @@ import { createEmailDraftUrl, decodePlan, encodePlan, sanitizeSharedPlan } from 
 
 const profile = {
   dayCount: 2,
+  visitStartDate: "2026-07-14",
   arrivalTime: "10:00",
   departureTime: "20:00",
   pace: "normal",
@@ -24,8 +25,72 @@ test("plan przechodzi bezpieczny round-trip przez link", () => {
   assert.ok(decoded);
   assert.equal(decoded.days.length, 2);
   assert.equal(decoded.profile.members.length, 3);
+  assert.equal(decoded.profile.visitStartDate, "2026-07-14");
   assert.equal(decoded.safety.valid, true);
   assert.deepEqual(decoded.days.map((day) => day.steps.map((step) => step.id)), plan.days.map((day) => day.steps.map((step) => step.id)));
+});
+
+test("round-trip planu 1–3 dni zachowuje cały dzień oraz opcje zapasowe", () => {
+  for (const dayCount of [1, 2, 3]) {
+    const plan = buildUniversalPlan({ ...profile, dayCount });
+    const decoded = decodePlan(encodePlan(plan));
+    assert.ok(decoded);
+    assert.equal(decoded.days.length, dayCount);
+    decoded.days.forEach((day, index) => {
+      const sourceFlex = plan.days[index].steps.at(-1);
+      const decodedFlex = day.steps.at(-1);
+      assert.equal(sourceFlex.kind, "flex");
+      assert.equal(decodedFlex.kind, "flex");
+      assert.equal(decodedFlex.unplannedUntil ?? decodedFlex.endMin, 20 * 60);
+      assert.deepEqual(decodedFlex.backupAttractionIds, sourceFlex.backupAttractionIds);
+      assert.equal(day.stats.end, "20:00");
+      assert.equal(day.stats.declaredDeparture, "20:00");
+    });
+  }
+});
+
+test("round-trip krótkiej wizyty 10:00–12:00 nie ucina końcówki dnia", () => {
+  const plan = buildUniversalPlan({
+    ...profile,
+    dayCount: 1,
+    arrivalTime: "10:00",
+    departureTime: "12:00",
+    meal: { mode: "fast", time: "11:00" },
+  });
+  const decoded = decodePlan(encodePlan(plan));
+
+  assert.ok(decoded);
+  const finalStep = decoded.days[0].steps.at(-1);
+  assert.equal(finalStep.kind, "flex");
+  assert.equal(finalStep.unplannedUntil ?? finalStep.endMin, 12 * 60);
+  assert.equal(decoded.days[0].stats.end, "12:00");
+  assert.equal(decoded.days[0].stats.declaredDeparture, "12:00");
+
+  const truncated = structuredClone(plan);
+  truncated.days[0].steps.pop();
+  assert.equal(sanitizeSharedPlan(truncated), null);
+});
+
+test("stary link bez pól bufora odzyskuje zadeklarowany koniec dnia", () => {
+  const legacy = structuredClone(buildUniversalPlan({ ...profile, dayCount: 3 }));
+  const vulnerableFlex = legacy.days.map((day) => day.steps.at(-1))
+    .find((step) => step.kind === "flex" && step.endMin < 20 * 60);
+  assert.ok(vulnerableFlex);
+  legacy.days.forEach((day) => {
+    const flex = day.steps.at(-1);
+    assert.equal(flex.kind, "flex");
+    delete flex.unplannedUntil;
+    delete flex.backupAttractionIds;
+  });
+
+  const restored = sanitizeSharedPlan(legacy);
+  assert.ok(restored);
+  restored.days.forEach((day) => {
+    const restoredFlex = day.steps.at(-1);
+    assert.equal(restoredFlex.unplannedUntil ?? restoredFlex.endMin, 20 * 60);
+    assert.deepEqual(restoredFlex.backupAttractionIds, []);
+    assert.equal(day.stats.end, "20:00");
+  });
 });
 
 test("uszkodzony lub obcy payload jest odrzucany", () => {

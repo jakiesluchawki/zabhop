@@ -19,6 +19,13 @@ function validTime(value, fallback) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(value ?? "")) ? String(value) : fallback;
 }
 
+function validDateKey(value, fallback = null) {
+  const key = String(value ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return fallback;
+  const parsed = new Date(`${key}T12:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key ? key : fallback;
+}
+
 function cleanId(value, fallback, used) {
   const base = String(value ?? "")
     .trim()
@@ -69,6 +76,7 @@ export function normalizeDraftProfile(input, fallback) {
 
   return {
     dayCount: Math.max(1, Math.min(3, Math.round(finiteNumber(source.dayCount, base.dayCount ?? 1)))),
+    visitStartDate: validDateKey(source.visitStartDate, validDateKey(base.visitStartDate, null)),
     arrivalTime: validTime(source.arrivalTime, base.arrivalTime ?? "10:00"),
     departureTime: validTime(source.departureTime, base.departureTime ?? "20:00"),
     pace: PACES.has(source.pace) ? source.pace : (PACES.has(base.pace) ? base.pace : "normal"),

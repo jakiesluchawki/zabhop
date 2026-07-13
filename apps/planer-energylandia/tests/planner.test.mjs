@@ -16,6 +16,7 @@ const child = (id, age, height) => ({ id, role: "child", name: id, age, height }
 function profile(overrides = {}) {
   return {
     dayCount: 1,
+    visitStartDate: "2026-07-14",
     arrivalTime: "10:00",
     departureTime: "20:00",
     pace: "normal",
@@ -95,6 +96,7 @@ test("splitPolicy never wyłącza podziały", () => {
 test("plany 1–3 dni są unikalne, mają twardy obiad i najwyżej jeden podział dziennie", () => {
   for (const dayCount of [1, 2, 3]) {
     const plan = buildUniversalPlan(profile({ dayCount }));
+    assert.equal(plan.profile.visitStartDate, "2026-07-14");
     assert.equal(plan.days.length, dayCount);
     const attractionIds = plan.days.flatMap((day) => day.steps.flatMap((step) => {
       if (step.kind === "ride") return [step.attractionId];
@@ -122,6 +124,20 @@ test("plany 1–3 dni są unikalne, mają twardy obiad i najwyżej jeden podzia�
   }
 });
 
+test("każdy plan 1–3 dni zachowuje pełny horyzont do zadeklarowanego wyjścia", () => {
+  for (const dayCount of [1, 2, 3]) {
+    const plan = buildUniversalPlan(profile({ dayCount, departureTime: "20:00" }));
+    for (const day of plan.days) {
+      const flex = day.steps.at(-1);
+      assert.equal(flex.kind, "flex");
+      assert.equal(flex.unplannedUntil ?? flex.endMin, 20 * 60);
+      assert.equal(day.stats.end, "20:00");
+      assert.equal(day.stats.declaredDeparture, "20:00");
+      assert.ok(Array.isArray(flex.backupAttractionIds));
+    }
+  }
+});
+
 test("plan kończy zadeklarowany dzień czytelnym buforem zamiast udawać pewność kolejek", () => {
   const plan = buildUniversalPlan(profile({ departureTime: "19:30" }));
   const flex = plan.days[0].steps.at(-1);
@@ -129,6 +145,21 @@ test("plan kończy zadeklarowany dzień czytelnym buforem zamiast udawać pewno�
   assert.ok(flex.endMin <= 19 * 60 + 30);
   assert.equal(flex.unplannedUntil, 19 * 60 + 30);
   assert.equal(plan.days[0].stats.end, "19:30");
+});
+
+test("krótka wizyta 10:00–12:00 ma czytelny horyzont aż do wyjścia", () => {
+  const plan = buildUniversalPlan(profile({
+    arrivalTime: "10:00",
+    departureTime: "12:00",
+    meal: { mode: "fast", time: "11:00" },
+  }));
+  const finalStep = plan.days[0].steps.at(-1);
+
+  assert.equal(plan.safety.valid, true);
+  assert.equal(finalStep.kind, "flex");
+  assert.equal(finalStep.unplannedUntil ?? finalStep.endMin, 12 * 60);
+  assert.equal(plan.days[0].stats.end, "12:00");
+  assert.equal(plan.days[0].stats.declaredDeparture, "12:00");
 });
 
 test("nieprawidłowa godzina używa właściwego fallbacku", () => {
@@ -308,6 +339,12 @@ test("walidator odrzuca dzieci bez dorosłego, duplikaty kroków i nielogiczne c
   const brokenTime = structuredClone(valid);
   brokenTime.days[0].steps[1].startMin = brokenTime.days[0].steps[0].startMin;
   assert.equal(validatePlanSafety(brokenTime).valid, false);
+
+  const truncatedHorizon = structuredClone(valid);
+  const flex = truncatedHorizon.days[0].steps.at(-1);
+  assert.equal(flex.kind, "flex");
+  flex.unplannedUntil = null;
+  assert.ok(validatePlanSafety(truncatedHorizon).issues.some((issue) => issue.includes("reszty zadeklarowanego dnia")));
 });
 
 test("walidator egzekwuje politykę podziału w całym planie", () => {

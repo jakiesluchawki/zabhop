@@ -35,6 +35,13 @@ function normalizeTime(value, fallback) {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value ?? "") ? value : fallback;
 }
 
+function normalizeDateKey(value) {
+  const key = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const parsed = new Date(`${key}T12:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key ? key : null;
+}
+
 export function timeToMinutes(value, fallback = 600) {
   const normalized = normalizeTime(value, null);
   if (!normalized) return fallback;
@@ -544,7 +551,12 @@ function scheduleDay(day, profile, queueById, backupAttractions = []) {
     .map((attraction) => attraction.id);
   const backupIds = [...new Set([...unusedBackupIds, ...repeatBackupIds])].slice(0, 3);
   const remaining = departure - minute;
-  if (steps.length > 0 && remaining >= FLEX_MINUTES_MIN) {
+  // Przy krótkiej wizycie nie rezerwujemy godzinnego bufora, ale nadal
+  // domykamy oś czasu do zadeklarowanego wyjścia. Dzięki temu nawet kilka
+  // pozostałych minut jest widocznym końcem planu, a nie „zaginionym”
+  // fragmentem dnia.
+  const minimumFlexMinutes = visitMinutes < 180 ? 1 : FLEX_MINUTES_MIN;
+  if (steps.length > 0 && remaining >= minimumFlexMinutes) {
     const duration = Math.min(FLEX_MINUTES_MAX, remaining);
     const backupNames = backupIds.map((id) => ALL_ATTRACTIONS_BY_ID[id]?.name).filter(Boolean);
     const laterWindow = remaining > duration
@@ -673,6 +685,7 @@ export function buildUniversalPlan(profile, { attractions = ALL_ATTRACTIONS, que
     generatedAt: new Date().toISOString(),
     profile: {
       dayCount,
+      visitStartDate: normalizeDateKey(profile.visitStartDate),
       arrivalTime: normalizeTime(profile.arrivalTime, "10:00"),
       departureTime: normalizeTime(profile.departureTime, "20:00"),
       pace: profile.pace,
@@ -815,8 +828,30 @@ export function validatePlanSafety(plan) {
       if (step.kind === "flex") {
         flexCount += 1;
         const duration = step.endMin - step.startMin;
-        if (duration < FLEX_MINUTES_MIN || duration > FLEX_MINUTES_MAX) {
-          issues.push(`${day.label}: bufor musi mieć od 60 do 90 minut.`);
+        const minimumFlexMinutes = departure - arrival < 180 ? 1 : FLEX_MINUTES_MIN;
+        if (duration < minimumFlexMinutes || duration > FLEX_MINUTES_MAX) {
+          issues.push(departure - arrival < 180
+            ? `${day.label}: bufor krótkiej wizyty musi mieć od 1 do 90 minut.`
+            : `${day.label}: bufor musi mieć od 60 do 90 minut.`);
+        }
+        const hasUnplannedUntil = step.unplannedUntil !== null && step.unplannedUntil !== undefined;
+        if (hasUnplannedUntil && (
+          !Number.isInteger(step.unplannedUntil)
+          || step.unplannedUntil <= step.endMin
+          || step.unplannedUntil !== departure
+        )) {
+          issues.push(`${day.label}: swobodne okno bufora musi kończyć się o zadeklarowanej porze wyjścia.`);
+        }
+        if (step.endMin < departure && !hasUnplannedUntil) {
+          issues.push(`${day.label}: bufor nie obejmuje reszty zadeklarowanego dnia.`);
+        }
+        if (
+          !Array.isArray(step.backupAttractionIds)
+          || step.backupAttractionIds.length > 3
+          || new Set(step.backupAttractionIds).size !== step.backupAttractionIds.length
+          || step.backupAttractionIds.some((id) => !ALL_ATTRACTIONS_BY_ID[id])
+        ) {
+          issues.push(`${day.label}: bufor ma nieprawidłowe atrakcje zapasowe.`);
         }
       }
       if (!new Set(["ride", "split", "meal", "flex"]).has(step.kind)) {
@@ -827,6 +862,13 @@ export function validatePlanSafety(plan) {
     if (!mealExpected && mealCount !== 0) issues.push(`${day.label}: plan bez posiłku nie może zawierać bloku obiadu.`);
     if (splitCount > 1) issues.push(`${day.label}: najwyżej jeden podział grupy na dzień.`);
     if (flexCount > 1) issues.push(`${day.label}: najwyżej jeden kontrolowany bufor na dzień.`);
+    const finalStep = day.steps?.at(-1);
+    const horizonEnd = finalStep?.kind === "flex"
+      ? finalStep.unplannedUntil ?? finalStep.endMin
+      : finalStep?.endMin;
+    if (horizonEnd !== departure) {
+      issues.push(`${day.label}: plan nie obejmuje całego okna aż do zadeklarowanego wyjścia.`);
+    }
   }
   if (plan?.profile?.splitPolicy === "worthwhile" && totalSplitCount > 1) {
     issues.push("Tryb „tylko gdy warto” pozwala najwyżej na jeden podział w całym planie.");
