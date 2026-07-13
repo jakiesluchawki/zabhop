@@ -1,0 +1,761 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "label": "Oficjalne strony pokazów Energylandii",
+    "url": "https://energylandia.pl/show/",
+    "checkedAt": "2026-07-13T18:50:58.916Z",
+    "timezone": "Europe/Warsaw",
+    "status": "fresh",
+    "indexCount": 18,
+    "refreshedCount": 18,
+    "retainedStaleCount": 0,
+    "scheduleRange": {
+      "from": "2026-07-14",
+      "to": "2026-07-17"
+    },
+    "note": "Godziny mogą zmienić się operacyjnie; przed pokazem sprawdź również tablice na miejscu."
+  },
+  "shows": [
+    {
+      "id": "around-the-world-robots-show",
+      "title": "Around The World Robots Show",
+      "url": "https://energylandia.pl/show/around-the-world-robots-show/",
+      "description": "Around The World Robots Show! 🤖🌍 🔥 Zapraszamy na interaktywny pokaz taneczno-akrobatyczny z udziałem trzech robotów, które zabierają publiczność w niezwykłą podróż dookoła świata! 🎯 Uruchom maszynę: Widzowie wspólnie uruchamiają maszynę losującą destynacje, dzięki której roboty odwiedzają różne zakątki globu. 💃 Kultury świata: Zobacz widowiskowe układy inspirowane zróżnicowanymi kulturami i stylami tanecznymi ze wszystkich stron świata! 🎉",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Teatr Colosseo",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=54",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/07/around_the_world.jpg",
+      "officialModifiedAt": "2026-07-08T16:43:43.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "11:30",
+            "17:00",
+            "18:00",
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "11:30",
+            "17:00",
+            "18:00",
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "11:30",
+            "17:00",
+            "18:00",
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "11:30",
+            "17:00",
+            "18:00",
+            "19:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "energylandia-express",
+      "title": "Energylandia Express",
+      "url": "https://energylandia.pl/show/energylandia-express/",
+      "description": "To pełen energii pokaz, który zabierze Was w podróż dookoła świata. Nasza obsługa pociągu wraz z konduktorem na czele zabiorą Was w niezwykłą podróż pełną emocji i niespodzianek. Wsiądź do naszego ekspresu i odkryj świat pełen barw, magii i niezapomnianych wrażeń.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Teatr Egypt",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=50",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/04/el_express.jpg",
+      "officialModifiedAt": "2026-06-26T07:13:17.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "12:00",
+            "14:00",
+            "16:00",
+            "16:45"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "12:00",
+            "14:00",
+            "16:00",
+            "16:45"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "12:00",
+            "14:00",
+            "16:00",
+            "16:45"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "12:00",
+            "14:00",
+            "16:00",
+            "16:45"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "extreme-energylandia-the-adrenaline-show",
+      "title": "Extreme Energylandia: The Adrenaline Show",
+      "url": "https://energylandia.pl/show/extreme-energylandia-the-adrenaline-show/",
+      "description": "Extreme Energylandia: The Adrenaline Show to zwarty, dynamiczny pokaz, w którym nasi kaskaderzy zaprezentują topowe umiejętności oraz triki. Będzie to spektakl na najwyższym, światowym poziomie! Zapnijcie pasy!",
+      "durationMinutes": 20,
+      "durationLabel": "20 min",
+      "venue": "Extreme Energylandia",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=101",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2024/05/extreme_the-adrenaline.jpg",
+      "officialModifiedAt": "2026-07-08T16:50:24.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "13:30",
+            "16:30"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "13:30",
+            "16:30"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "13:30",
+            "16:30"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "13:30",
+            "16:30"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "extreme-energylandia-the-challenge-show",
+      "title": "Extreme Energylandia: The Challenge Show",
+      "url": "https://energylandia.pl/show/extreme-energylandia-the-challenge-show/",
+      "description": "Widowiskowy pokaz kaskaderski z udziałem Can-Am Maverick R, w którym każdy poziom to nowe, coraz trudniejsze wyzwanie. Szybka jazda, precyzyjne manewry i efektowne akcje sprawiają, że adrenalina rośnie z minuty na minutę. Kolejne challenge podnoszą poprzeczkę, a wszystko dzieje się na oczach widzów. Jedno jest pewne – tu emocje wchodzą na najwyższy poziom!",
+      "durationMinutes": 20,
+      "durationLabel": "20 min",
+      "venue": "Extreme Energylandia",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=101",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/04/extreme_the-challenge.jpg",
+      "officialModifiedAt": "2026-07-02T11:38:10.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "15:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "15:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "15:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "15:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "energylandia-extreme-show-2",
+      "title": "Extreme Energylandia: The Game Show",
+      "url": "https://energylandia.pl/show/energylandia-extreme-show-2/",
+      "description": "Wyjątkowy pokaz w wykonaniu Extreme Energylandia Team. Podczas pokazu Extreme Energylandia: The Game Show nasi kaskaderzy oraz artyści wcielą się w rolę graczy biorących udział w najróżniejszych misjach. W trakcie pokazu nie zabraknie akrobacji, ognia, efektów pirotechnicznych oraz… śmiechu!",
+      "durationMinutes": 20,
+      "durationLabel": "20 min",
+      "venue": "Extreme Energylandia",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=101",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2020/01/extreme_the-game.jpg",
+      "officialModifiedAt": "2026-07-13T15:46:00.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "18:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "18:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "18:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "18:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "fire-show",
+      "title": "Fire Show",
+      "url": "https://energylandia.pl/show/fire-show/",
+      "description": "Pokaz rozbudzi wasze zmysły w niebezpiecznej grze z ogniem. Niesamowity pokaz, który oczaruje najbardziej wymagających gości w wykonaniu doświadczonych Artystów ogniowych.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Amfiteatr Egypt",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=51",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2020/01/fire_show.jpg",
+      "officialModifiedAt": "2026-07-08T16:45:27.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "19:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "funny-in-sweet-valley-show",
+      "title": "Funny In Sweet Valley Show",
+      "url": "https://energylandia.pl/show/funny-in-sweet-valley-show/",
+      "description": "Zabawny show dla małych i dużych prowadzony przez charyzmatycznego bohatera. Ogromna dawka śmiechu, i kontakt z publicznością sprawiają, że każdy daje się wciągnąć w tę zwariowaną zabawę. Jedno jest pewne, na pewno będziesz się śmiać!",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Town Hall Theatre",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=238",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/04/funny_in_sv.jpg",
+      "officialModifiedAt": "2026-07-08T16:48:42.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "12:00",
+            "14:30",
+            "16:15",
+            "18:15"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "12:00",
+            "14:30",
+            "16:15",
+            "18:15"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "12:00",
+            "14:30",
+            "16:15",
+            "18:15"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "12:00",
+            "14:30",
+            "16:15",
+            "18:15"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "parada",
+      "title": "Parada",
+      "url": "https://energylandia.pl/show/parada/",
+      "description": "Coś fantastycznego! Barwny korowód postaci, które spotkać możecie tylko w Energylandii! Energetyzujący pokaz, rytmiczne i wesołe zaproszenie do wspólnej zabawy i spaceru po naszym parku!",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Strefa Formuła",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=118",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2020/01/parada_900x600.jpg",
+      "officialModifiedAt": "2026-07-09T12:32:27.000Z",
+      "schedule": [],
+      "completeForScheduling": false,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "piraci-z-zatoki-67",
+      "title": "Piraci z Zatoki 67!",
+      "url": "https://energylandia.pl/show/piraci-z-zatoki-67/",
+      "description": "Piraci których można spotkać w teatrze Colosseo mają dość oceanów ! Ostatnie lata spędzili na wodach całego świata, nabywając przy tym niecodziennych umiejętności. Postanowili więcej nie wypływać w morze! Dotarli do zatoki 67 SIX/SEVEN i tutaj zostają aby robić popisy i prezentować to czego nauczyli się dryfując na szerokich wodach !",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Teatr Colosseo",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=54",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/06/piraci_z_ztoki67.jpg",
+      "officialModifiedAt": "2026-07-02T16:05:49.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "12:15",
+            "13:45",
+            "15:45",
+            "17:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "12:15",
+            "13:45",
+            "15:45",
+            "17:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "12:15",
+            "13:45",
+            "15:45",
+            "17:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "12:15",
+            "13:45",
+            "15:45",
+            "17:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "planetarium",
+      "title": "Planetarium",
+      "url": "https://energylandia.pl/show/planetarium/",
+      "description": "Planetarium oferuje kilkunastominutowe seanse o ciekawej – zwłaszcza dla młodzieży jak również dorosłych – tematyce. Klimatyzowana, przestronna sala, z wygodnymi fotelami sprawi, że “podróż w kosmos” będzie jeszcze przyjemniejsza. Z atrakcji mogą skorzystać dzieci już od 8 roku życia.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Planetarium",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=76",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2024/06/Planetarium_2024_1.jpg",
+      "officialModifiedAt": "2024-06-20T11:36:09.000Z",
+      "schedule": [],
+      "completeForScheduling": false,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "pokaz-fajerwerkow",
+      "title": "Pokaz Fajerwerków",
+      "url": "https://energylandia.pl/show/pokaz-fajerwerkow/",
+      "description": "Spektakularny pokaz fajerwerków przy muzyce uczyni tę noc jeszcze bardziej magiczną! Zapraszamy Podczas Magic Night o godzinie 21:45.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Pokaz Fajerwerków",
+      "mapUrl": null,
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2024/07/pokaz_fajerwerko%CC%81w.jpg",
+      "officialModifiedAt": "2026-07-08T16:32:03.000Z",
+      "schedule": [],
+      "completeForScheduling": false,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "pyramid-cinema-7d",
+      "title": "Pyramid Cinema 7D",
+      "url": "https://energylandia.pl/show/pyramid-cinema-7d/",
+      "description": "Pyramid Cinema to kino 7D oferujące odwiedzającym niesamowite przeżycia dzięki połączeniu i zsynchronizowaniu projekcji filmów trójwymiarowych z krystalicznie czystym dźwiękiem przestrzennym oraz specjalnym efektom w jakie dodatkowo wyposażone są fotele i sala kinowa. Połączenie tych wszystkich elementów daje uczestnikom odczuwalne wszystkimi zmysłami, pełne i niemalże namacalne wrażenie przeniesienia się w fikcyjny, fantastyczny świat. Budynek w kształcie ogromnej piramidy, potężne posągi faraonów i rzeźby Anubisa oraz wszystkie elementy aranżacji utrzymane w starożytnej egipskiej stylizacji jeszcze bardziej podkreślają wyjątkowy charakter tej atrakcji. Z atrakcji mogą skorzystać dzieci już od 6 roku życia.",
+      "durationMinutes": 20,
+      "durationLabel": "20 min",
+      "venue": "Pyramid Cinema 7D",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=56",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2020/01/Pyramid_Cinema_2024_5.jpg",
+      "officialModifiedAt": "2024-06-20T08:16:46.000Z",
+      "schedule": [],
+      "completeForScheduling": false,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "spotkanie-z-maskotkami",
+      "title": "Spotkanie z Maskotkami",
+      "url": "https://energylandia.pl/show/spotkanie-z-maskotkami/",
+      "description": "Nasze maskotki czekają na Ciebie! Chcesz zrobić sobie pamiątkowe zdjęcie? A może przybić piątkę lub przytulić się do swojego ulubieńca? Żółw Bartuś, Króliczka Sissi i Lew Leoś Zapraszają! Ten czas jest właśnie dla Ciebie! Dziedziniec – 10:00/11:00/19:15/20:00/21:00 Scena Kids Show – 12:00/13:30 Toffee Theatre – 15:45/18:00",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Spotkanie z Maskotkami",
+      "mapUrl": null,
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/04/meeting_with_mascots.jpg",
+      "officialModifiedAt": "2026-07-08T16:53:00.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:30",
+            "15:45",
+            "18:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:30",
+            "15:45",
+            "18:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:30",
+            "15:45",
+            "18:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "10:00",
+            "11:00",
+            "12:00",
+            "13:30",
+            "15:45",
+            "18:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "teatr-egipt",
+      "title": "Teatr Egypt",
+      "url": "https://energylandia.pl/show/teatr-egipt/",
+      "description": "Tutaj Goście zobaczą najnowsze pokazy w wykonaniu naszych zdolnych artystów. Widowiska o charakterze muzycznym, musicalowym, teatralnym czy tanecznym.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Teatr Egypt",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=50",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2020/01/teatr_egypt_2024_1.jpg",
+      "officialModifiedAt": "2024-06-20T11:51:22.000Z",
+      "schedule": [],
+      "completeForScheduling": false,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "the-balloons-party-show",
+      "title": "The Balloons Party Show",
+      "url": "https://energylandia.pl/show/the-balloons-party-show/",
+      "description": "Kolorowy, pełen śmiechu i dobrej zabawy pokaz dla całej rodziny! THE BALLOONS PARTY SHOW to wyjątkowe widowisko! Interaktywna forma pokazu angażuje zarówno dzieci, jak i dorosłych, tworząc atmosferę wspólnej zabawy, radości i niezapomnianych wspomnień. To doskonała propozycja dla wszystkich, którzy chcą na chwilę przenieść się do świata kreatywności, kolorów i rodzinnej rozrywki.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Toffee Theatre",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=225",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/06/the_ballons_paty_show-900x600-1.jpg",
+      "officialModifiedAt": "2026-07-08T16:47:24.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "13:30",
+            "15:15",
+            "17:15",
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "13:30",
+            "15:15",
+            "17:15",
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "13:30",
+            "15:15",
+            "17:15",
+            "19:00"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "13:30",
+            "15:15",
+            "17:15",
+            "19:00"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "the-book-of-magic",
+      "title": "The Book Of Magic",
+      "url": "https://energylandia.pl/show/the-book-of-magic/",
+      "description": "The Book of Magic – Pokaz z udziałem robotów! 🤖✨ Głęboko pod ziemią Energylandia skrywa swoją największą tajemnicę. To właśnie tam znajduje się miejsce, gdzie magia spotyka się z najnowocześniejszą technologią, a to, co niemożliwe, dzieje się na naszych oczach. Daj się zaczarować i sprawdź, jakie technologiczne sekrety kryje „The Book of Magic” podczas tego wyjątkowego widowiska z udziałem inteligentnych robotów! 🔮",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Teatr Egypt",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=50",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2025/04/the_book_of_magic-1.jpg",
+      "officialModifiedAt": "2026-07-08T16:44:26.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "13:00",
+            "14:45",
+            "15:15"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "13:00",
+            "14:45",
+            "15:15"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "13:00",
+            "14:45",
+            "15:15"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "13:00",
+            "14:45",
+            "15:15"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "toffee-theatre",
+      "title": "Toffee Theatre",
+      "url": "https://energylandia.pl/show/toffee-theatre/",
+      "description": "Wyjątkowe miejsce pokazów! Tutaj zachwycicie się talentem naszych artystów! W repertuarze teatru: The Balloons Party Show oraz Spotkanie z Maskotkami.",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Toffee Theatre",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=225",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2024/06/L52A0607-1-scaled.jpg",
+      "officialModifiedAt": "2026-06-30T14:02:05.000Z",
+      "schedule": [],
+      "completeForScheduling": false,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    },
+    {
+      "id": "zaloga-na-poklad",
+      "title": "Załoga Na Pokład!",
+      "url": "https://energylandia.pl/show/zaloga-na-poklad/",
+      "description": "Statek dobił do brzegu czas na niego wsiąść i przeżyć przygody wraz z piratami. Nasi artyści zaprezentują pełne energii pirackie show, w którym nie zabraknie humoru, i dobrej zabawy. Dołącz do załogi i poczuj prawdziwego ducha pirackiej przygody!",
+      "durationMinutes": 15,
+      "durationLabel": "15 min",
+      "venue": "Amfiteatr Colosseo",
+      "mapUrl": "https://energylandia.pl/mapa-parku/?location=55",
+      "imageUrl": "https://energylandia.pl/wp-content/uploads/2026/06/zaloga_na_poklad900x600.jpg",
+      "officialModifiedAt": "2026-07-02T16:06:46.000Z",
+      "schedule": [
+        {
+          "date": "2026-07-14",
+          "label": "Jutro , 14 lipca",
+          "times": [
+            "12:45",
+            "14:15",
+            "16:15",
+            "17:30"
+          ]
+        },
+        {
+          "date": "2026-07-15",
+          "label": "środa , 15 lipca",
+          "times": [
+            "12:45",
+            "14:15",
+            "16:15",
+            "17:30"
+          ]
+        },
+        {
+          "date": "2026-07-16",
+          "label": "czwartek , 16 lipca",
+          "times": [
+            "12:45",
+            "14:15",
+            "16:15",
+            "17:30"
+          ]
+        },
+        {
+          "date": "2026-07-17",
+          "label": "piątek , 17 lipca",
+          "times": [
+            "12:45",
+            "14:15",
+            "16:15",
+            "17:30"
+          ]
+        }
+      ],
+      "completeForScheduling": true,
+      "checkedAt": "2026-07-13T18:50:58.916Z",
+      "stale": false
+    }
+  ],
+  "failures": []
+}
