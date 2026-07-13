@@ -3,15 +3,17 @@
 Mobilna aplikacja dla rodziny w Energylandii. Łączy dwa tryby w jednym adresie:
 
 - **Pogoda** — ocena 0–100, najlepsze okno wizyty, kilka niezależnych prognoz i porównanie biletu na jeden lub dwa dni.
-- **Na miejscu** — trasa dla dwóch dorosłych i dwojga sześciolatków, filtrowana oddzielnie po wieku i wzroście dzieci, mapa GPS, plan WC oraz czasy kolejek.
+- **Na miejscu** — prywatna trasa dla dwóch dorosłych i dwojga sześciolatków 120–129 cm, mapa GPS, plan WC oraz czasy kolejek.
 
-Widok parkowy jest dostępny bezpośrednio pod hashem `#park`. Dane profilu, zaliczone atrakcje i ostatnia przerwa na WC są przechowywane wyłącznie lokalnie w przeglądarce.
+Widok parkowy jest dostępny bezpośrednio pod hashem `#park`. Zaliczone atrakcje i ostatnia przerwa na WC są przechowywane wyłącznie lokalnie w przeglądarce.
 
 ## Jak działa trasa
 
-Domyślnie aplikacja nie zgaduje wzrostu dzieci. Do czasu ustawienia obu profili pokazuje tylko atrakcje dostępne na podstawie wieku z opiekunem. Po wybraniu wzrostu wspólna trasa używa progu niższego dziecka.
+Profil jest celowo stały: **Ja + Adam + dwoje dzieci po 6 lat, 120–129 cm**. Nie ma selektora wzrostu ani trybu ogólnego.
 
-Plan prowadzi od dalszych stref w stronę wyjścia: **Sweet Valley → Aqualantis → Smoczy Gród → Strefa Familijna → Bajkolandia**. Pomija atrakcje typowo dla maluchów, odrzuca pozycje zamknięte i pozwala oznaczać kolejne punkty jako zrobione. GPS może przeliczyć najbliższy sensowny przystanek i najbliższą toaletę.
+Zielone atrakcje mają oficjalny próg 120 cm z opiekunem i tworzą główny plan: Abyssus, Formuła, Choco Chip Creek, RMF Dragon, Anaconda i Jungle Adventure. Żółte atrakcje są dostępne już od 100–110 cm albo na podstawie wieku, więc pozostają opcjonalnym planem zapasowym. Atrakcje wymagające minimum 130 lub 140 cm są pomijane.
+
+Plan prowadzi od dalszych stref w stronę wyjścia: **Sweet Valley → Aqualantis → Smoczy Gród → Strefa Ekstremalna → Strefa Familijna → Bajkolandia**. Pomija atrakcje typowo dla maluchów, odrzuca pozycje zamknięte i pozwala oznaczać kolejne punkty jako zrobione. GPS preferuje zielony priorytet i może wskazać najbliższą toaletę.
 
 Czasy z Queue-Times są nieoficjalne. Aplikacja pokazuje odczyt źródłowy, ale przy rekomendacji ostrożnie mnoży kolejkę przez 1,5, ponieważ relacje gości wskazują na okresowe zaniżenia. Oznaczenia przy atrakcji i polecenia obsługi zawsze mają pierwszeństwo.
 

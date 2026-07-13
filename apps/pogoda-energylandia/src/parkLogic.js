@@ -2,6 +2,17 @@ import { ATTRACTIONS, DEFAULT_ZONE_ORDER, TOILETS } from "./parkData.js";
 
 export const WALKING_METERS_PER_MINUTE = 65;
 
+export const FAMILY_PROFILE = Object.freeze({
+  adults: 2,
+  children: 2,
+  childAge: 6,
+  withGuardian: true,
+  safeHeightCm: 120,
+  heightRange: Object.freeze({ min: 120, max: 129 }),
+  heightRangeLabel: "120–129 cm",
+  description: "2 dorosłych · 2 dzieci po 6 lat · 120–129 cm",
+});
+
 const CLOSED_STATUSES = new Set([
   "closed",
   "down",
@@ -163,6 +174,37 @@ export function evaluateEligibility(attraction, { height, age = 6, withGuardian 
   return { eligible: true, mode: "unrestricted", reason: "Brak ograniczeń dla tego profilu." };
 }
 
+export function classifyAttractionForFamily(attraction) {
+  if (!attraction || typeof attraction !== "object" || attraction.toddlerLike) {
+    return "excluded";
+  }
+
+  const restrictions = restrictionsFor(attraction);
+  const minHeightWithGuardian = finiteNumber(restrictions.minHeightWithGuardian);
+  const minAgeWithGuardian = finiteNumber(restrictions.minAgeWithGuardian);
+
+  // A 140 cm solo threshold is fine when the children may ride with a guardian
+  // from 120 cm. We only exclude rides whose guarded minimum itself is 140+.
+  if (minHeightWithGuardian !== null && minHeightWithGuardian >= 140) {
+    return "excluded";
+  }
+
+  const eligibility = evaluateEligibility(attraction, {
+    height: FAMILY_PROFILE.safeHeightCm,
+    age: FAMILY_PROFILE.childAge,
+    withGuardian: FAMILY_PROFILE.withGuardian,
+  });
+  if (!eligibility.eligible) return "excluded";
+
+  if (minHeightWithGuardian === FAMILY_PROFILE.safeHeightCm) return "primary";
+  if (minHeightWithGuardian === 100 || minHeightWithGuardian === 110) return "secondary";
+  if (minHeightWithGuardian === null && minAgeWithGuardian !== null) return "secondary";
+
+  // Keep the private shortlist intentionally strict. Unknown or unusual
+  // thresholds must be reviewed before they can enter the yellow fallback.
+  return "excluded";
+}
+
 export function getEligibleAttractions({
   height,
   age = 6,
@@ -251,7 +293,7 @@ function isCompleted(attraction, completed) {
 
 function orderedZones(startZone) {
   if (startZone === "aqualantis") {
-    return ["aqualantis", "sweet-valley", "dragon-zone", "family-zone", "fairyland"];
+    return ["aqualantis", "sweet-valley", "dragon-zone", "extreme-zone", "family-zone", "fairyland"];
   }
   return [...DEFAULT_ZONE_ORDER];
 }
@@ -269,9 +311,9 @@ function inferStartZone(position) {
 }
 
 export function buildRoute({
-  height,
-  age = 6,
-  withGuardian = true,
+  height = FAMILY_PROFILE.safeHeightCm,
+  age = FAMILY_PROFILE.childAge,
+  withGuardian = FAMILY_PROFILE.withGuardian,
   completedIds = [],
   position = null,
   startZone,
@@ -283,7 +325,8 @@ export function buildRoute({
   const zoneOrder = orderedZones(startZone ?? inferStartZone(position));
   const zoneRank = new Map(zoneOrder.map((zone, index) => [zone, index]));
   const eligible = getEligibleAttractions({ height, age, withGuardian, attractions })
-    .filter((item) => !item.toddlerLike)
+    .map((item) => ({ ...item, familyTier: classifyAttractionForFamily(item) }))
+    .filter((item) => item.familyTier !== "excluded")
     .filter((item) => !isCompleted(item, completed))
     .map((item) => ({ ...item, live: resolveAttractionState(item, { queueById, statusById }) }))
     .filter((item) => item.live.isAvailable)
@@ -312,9 +355,9 @@ export function buildRoute({
 
 export function chooseNextStop({
   position,
-  height,
-  age = 6,
-  withGuardian = true,
+  height = FAMILY_PROFILE.safeHeightCm,
+  age = FAMILY_PROFILE.childAge,
+  withGuardian = FAMILY_PROFILE.withGuardian,
   completedIds = [],
   queueById = {},
   statusById = {},
@@ -325,14 +368,16 @@ export function chooseNextStop({
   const completed = completedSet(completedIds);
 
   const candidates = getEligibleAttractions({ height, age, withGuardian, attractions })
-    .filter((item) => !item.toddlerLike)
+    .map((item) => ({ ...item, familyTier: classifyAttractionForFamily(item) }))
+    .filter((item) => item.familyTier !== "excluded")
     .filter((item) => !isCompleted(item, completed))
     .map((item) => {
       const live = resolveAttractionState(item, { queueById, statusById });
       const distance = distanceMeters(currentPosition, item);
       const walk = walkingMinutes(distance);
       const queue = live.queueMinutes ?? 12;
-      const score = item.priority - queue * 1.8 - walk * 2;
+      const familyTierBoost = item.familyTier === "primary" ? 500 : 0;
+      const score = familyTierBoost + item.priority - queue * 1.8 - walk * 2;
       return { item, live, distance, walk, score };
     })
     .filter((candidate) => candidate.live.isAvailable)

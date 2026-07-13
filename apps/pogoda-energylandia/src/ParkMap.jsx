@@ -58,7 +58,10 @@ export function ParkMap({
     if (!map || !layer) return;
     layer.clearLayers();
 
-    const routePoints = attractions.map(coordinates).filter(Boolean);
+    const routePoints = attractions
+      .filter((attraction) => attraction.familyTier === "primary")
+      .map(coordinates)
+      .filter(Boolean);
     if (routePoints.length > 1) {
       L.polyline(routePoints, {
         color: "#7442d9",
@@ -69,18 +72,21 @@ export function ParkMap({
       }).addTo(layer);
     }
 
-    attractions.forEach((attraction, index) => {
+    attractions.forEach((attraction) => {
       const point = coordinates(attraction);
       if (!point) return;
       const selected = attraction.id === selectedId;
+      const primary = attraction.familyTier === "primary";
+      const markerColor = primary ? "#2f643e" : "#8a6818";
+      const markerFill = primary ? "#3f7f51" : "#e0b43d";
       const marker = L.circleMarker(point, {
         radius: selected ? 10 : 7,
-        color: selected ? "#fff7f1" : "#7442d9",
+        color: selected ? "#fff7f1" : markerColor,
         weight: selected ? 4 : 2,
-        fillColor: selected ? "#ee6d55" : "#ffe1eb",
+        fillColor: markerFill,
         fillOpacity: 1,
       }).addTo(layer);
-      marker.bindTooltip(`${index + 1}. ${attraction.name}`, {
+      marker.bindTooltip(`${attraction.name} · ${primary ? "zielony 120+" : "żółty opcjonalny"}`, {
         direction: "top",
         offset: [0, -8],
       });
@@ -108,9 +114,9 @@ export function ParkMap({
       if (Number.isFinite(position.accuracy)) {
         L.circle(userPoint, {
           radius: Math.min(position.accuracy, 120),
-          color: "#3f7f51",
+          color: "#7442d9",
           weight: 1,
-          fillColor: "#3f7f51",
+          fillColor: "#7442d9",
           fillOpacity: 0.09,
         }).addTo(layer);
       }
@@ -118,7 +124,7 @@ export function ParkMap({
         radius: 8,
         color: "#fff7f1",
         weight: 3,
-        fillColor: "#3f7f51",
+        fillColor: "#7442d9",
         fillOpacity: 1,
       }).bindTooltip("Jesteście tutaj", { permanent: false, direction: "top" }).addTo(layer);
     }
