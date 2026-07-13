@@ -16,6 +16,8 @@ function hours(values = {}) {
 }
 
 const normal = { icmAvailable: true, numericSourceCount: 2 };
+const NOWCAST_NOW = "2026-07-13T16:00:00.000Z";
+const NOWCAST_FRESH = "2026-07-13T15:50:00.000Z";
 
 test("idealna pogoda daje pozytywny, ale ostrożny werdykt przy dwóch źródłach liczbowych", () => {
   const result = evaluateWindow(hours(), normal);
@@ -53,7 +55,8 @@ test("alarm Antistorm ma pierwszeństwo dla wyjazdu teraz", () => {
   const result = evaluateWindow(hours(), {
     ...normal,
     applyAntistorm: true,
-    antistorm: { p_b: 80, t_b: 25, p_o: 100, t_o: 20 },
+    now: NOWCAST_NOW,
+    antistorm: { p_b: 80, t_b: 25, p_o: 100, t_o: 20, updatedAt: NOWCAST_FRESH },
   });
   assert.equal(result.score, 15);
   assert.equal(result.antistormStatus, "czerwony");
@@ -63,7 +66,8 @@ test("Antistorm nie traktuje ilości opadu jak alarmu burzowego", () => {
   const result = evaluateWindow(hours(), {
     ...normal,
     applyAntistorm: true,
-    antistorm: { p_b: 0, t_b: 255, a_b: 12, p_o: 0, t_o: 255, a_o: 8, s: 4 },
+    now: NOWCAST_NOW,
+    antistorm: { p_b: 0, t_b: 255, a_b: 12, p_o: 0, t_o: 255, a_o: 8, s: 4, updatedAt: NOWCAST_FRESH },
   });
   assert.equal(result.antistormStatus, "zielony");
   assert.equal(result.score, 85);

@@ -9,7 +9,9 @@ import {
   CheckCircle,
   Clock,
   Copy,
+  Crosshair,
   EnvelopeSimple,
+  Footprints,
   ForkKnife,
   GoogleLogo,
   MapPin,
@@ -45,12 +47,29 @@ import {
   planFromHash,
   sanitizeSharedPlan,
 } from "./share.js";
+import {
+  approximateWalkingMinutes,
+  countPlanAttractions,
+  distanceMeters,
+  formatDistance,
+  normalizeDraftProfile,
+  queueFreshness,
+} from "./appUtils.js";
 
 const DRAFT_KEY = "energylandia-planner-v1:draft";
 const PLAN_KEY = "energylandia-planner-v1:plan";
 const COMPLETED_KEY = "energylandia-planner-v1:completed";
 
 const STEP_LABELS = ["CZAS", "SKŁAD", "WZROST", "APETYT", "PODZIAŁ", "OBIAD", "PODSUMOWANIE"];
+const STEP_ILLUSTRATIONS = [
+  { file: "01-czas.jpg", alt: "Trzy filcowe bilety połączone trasą kolejki między wschodem słońca i wieczorem" },
+  { file: "02-sklad.jpg", alt: "Filcowa grupa dorosłych i dzieci jadąca razem parkową kolejką" },
+  { file: "03-wzrost.jpg", alt: "Filcowe postacie przy miarce wzrostu przed wejściem na atrakcję" },
+  { file: "04-apetyt.jpg", alt: "Trzy filcowe ścieżki prowadzące do spokojnych, rodzinnych i mocnych atrakcji" },
+  { file: "05-podzial.jpg", alt: "Dwie bezpieczne filcowe trasy, na każdej dorosły z dzieckiem, łączące się w miejscu spotkania" },
+  { file: "06-obiad.jpg", alt: "Filcowy stół piknikowy z posiłkiem ustawiony przy trasie przez park" },
+  { file: "07-podsumowanie.jpg", alt: "Rozwinięta filcowa mapa kompletnego dnia z punktami trasy, obiadem i metą" },
+];
 
 const DEFAULT_PROFILE = Object.freeze({
   dayCount: 1,
@@ -112,6 +131,83 @@ function memberLabel(member) {
   return member?.name?.trim() || (member?.role === "adult" ? "Dorosły" : "Dziecko");
 }
 
+function safeSanitizePlan(value) {
+  try {
+    return sanitizeSharedPlan(value);
+  } catch {
+    return null;
+  }
+}
+
+function useUserLocation() {
+  const [position, setPosition] = useState(null);
+  const [status, setStatus] = useState("idle");
+  const watchRef = useRef(null);
+
+  const locate = useCallback(() => {
+    if (!navigator.geolocation) {
+      setPosition(null);
+      setStatus("unsupported");
+      return;
+    }
+    if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
+    setPosition(null);
+    setStatus("loading");
+    watchRef.current = navigator.geolocation.watchPosition(
+      ({ coords }) => {
+        setPosition({ lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy });
+        setStatus("ready");
+      },
+      (error) => {
+        setPosition(null);
+        if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
+        watchRef.current = null;
+        setStatus(error?.code === 1 ? "denied" : "error");
+      },
+      { enableHighAccuracy: true, maximumAge: 8_000, timeout: 15_000 },
+    );
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let permission = null;
+    const syncPermission = () => {
+      if (cancelled || !permission) return;
+      if (permission.state === "granted") {
+        if (watchRef.current == null) locate();
+      } else if (permission.state === "denied") {
+        if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+        watchRef.current = null;
+        setPosition(null);
+        setStatus("denied");
+      } else {
+        setPosition(null);
+        setStatus("idle");
+      }
+    };
+    navigator.permissions?.query?.({ name: "geolocation" }).then((result) => {
+      if (cancelled) return;
+      permission = result;
+      syncPermission();
+      permission.addEventListener?.("change", syncPermission);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      permission?.removeEventListener?.("change", syncPermission);
+      if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+    };
+  }, [locate]);
+
+  return { position, status, locate };
+}
+
+function distanceCopy(position, attraction) {
+  const meters = distanceMeters(position, attraction);
+  const formatted = formatDistance(meters);
+  const minutes = approximateWalkingMinutes(meters);
+  return formatted && minutes ? `${formatted} · około ${minutes} min pieszo` : null;
+}
+
 function Stepper({ label, detail, value, min = 0, max = 8, onChange }) {
   return (
     <div className="stepper-row">
@@ -139,7 +235,25 @@ function ChoiceCard({ selected, disabled = false, title, detail, icon: Icon, onC
   );
 }
 
-function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatus }) {
+function WizardIllustration({ step }) {
+  const illustration = STEP_ILLUSTRATIONS[step];
+  if (!illustration) return null;
+  return (
+    <figure className="wizard-illustration" key={illustration.file}>
+      <img
+        src={`${import.meta.env.BASE_URL}assets/onboarding/${illustration.file}`}
+        alt={illustration.alt}
+        width="960"
+        height="640"
+        loading="eager"
+        decoding="async"
+      />
+    </figure>
+  );
+}
+
+function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatus, queueUpdatedAt, onRefreshQueues, generationError }) {
+  const headingRef = useRef(null);
   const adults = countByRole(profile.members, "adult");
   const children = countByRole(profile.members, "child");
   const guardians = profile.members.filter(isGuardian).length;
@@ -172,16 +286,33 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
   const canContinue = (step !== 0 || visitTimeValid)
     && (step !== 2 || (heightsValid && agesValid && guardians >= 1))
     && (step !== 5 || mealTimeValid);
+  const freshness = queueFreshness(queueUpdatedAt);
+  const goToStep = useCallback((nextStep) => {
+    setStep(Math.max(0, Math.min(STEP_LABELS.length - 1, nextStep)));
+  }, [setStep]);
+
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+    headingRef.current?.focus({ preventScroll: true });
+  }, [step]);
+
+  useEffect(() => {
+    const nextIllustration = STEP_ILLUSTRATIONS[step + 1];
+    if (!nextIllustration) return undefined;
+    const preload = new Image();
+    preload.src = `${import.meta.env.BASE_URL}assets/onboarding/${nextIllustration.file}`;
+    return () => { preload.onload = null; };
+  }, [step]);
 
   return (
     <main className="onboarding-shell screen-app">
       <header className="wizard-header">
-        <button className="icon-button ghost" type="button" aria-label="Wróć" onClick={() => step === 0 ? window.location.reload() : setStep(step - 1)}>
+        <button className="icon-button ghost" type="button" aria-label="Wróć" onClick={() => step === 0 ? window.location.reload() : goToStep(step - 1)}>
           <ArrowLeft size={21} weight="bold" />
         </button>
         <div className="wizard-progress-copy">
           <span>{STEP_LABELS[step]} • {step + 1} Z {STEP_LABELS.length}</span>
-          <div className="wizard-progress"><i style={{ width: `${((step + 1) / STEP_LABELS.length) * 100}%` }} /></div>
+          <div className="wizard-progress" role="progressbar" aria-label="Postęp konfiguracji planu" aria-valuemin="1" aria-valuemax={STEP_LABELS.length} aria-valuenow={step + 1}><i style={{ width: `${((step + 1) / STEP_LABELS.length) * 100}%` }} /></div>
         </div>
       </header>
 
@@ -189,11 +320,12 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
         {step === 0 && (
           <>
             <p className="eyebrow">NAJPIERW RAMY DNIA</p>
-            <h1>Na ile dni przyjeżdżacie?</h1>
+            <h1 ref={headingRef} tabIndex="-1">Na ile dni przyjeżdżacie?</h1>
             <p className="step-lead">Rozłożymy strefy tak, żeby nie robić trzy razy tej samej pętli.</p>
+            <WizardIllustration step={step} />
             <div className="day-choice-grid">
               {[1, 2, 3].map((days) => (
-                <button key={days} className={profile.dayCount === days ? "selected" : ""} type="button" onClick={() => setProfile((current) => ({ ...current, dayCount: days }))}>
+                <button key={days} className={profile.dayCount === days ? "selected" : ""} type="button" aria-pressed={profile.dayCount === days} onClick={() => setProfile((current) => ({ ...current, dayCount: days }))}>
                   <CalendarBlank size={25} weight={profile.dayCount === days ? "fill" : "duotone"} />
                   <strong>{days}</strong><span>{days === 1 ? "dzień" : "dni"}</span>
                 </button>
@@ -203,15 +335,16 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
               <label><span>Wchodzicie około</span><input type="time" value={profile.arrivalTime} onChange={(event) => setProfile((current) => ({ ...current, arrivalTime: event.target.value }))} /></label>
               <label><span>Kończycie około</span><input type="time" value={profile.departureTime} onChange={(event) => setProfile((current) => ({ ...current, departureTime: event.target.value }))} /></label>
             </div>
-            {!visitTimeValid && <div className="warning-note"><WarningCircle size={21} weight="fill" /><span>Godzina wyjścia musi być co najmniej godzinę po wejściu.</span></div>}
+            {!visitTimeValid && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>Godzina wyjścia musi być co najmniej godzinę po wejściu.</span></div>}
           </>
         )}
 
         {step === 1 && (
           <>
             <p className="eyebrow">KTO DZIŚ JEDZIE</p>
-            <h1>W jakim jesteście składzie?</h1>
+            <h1 ref={headingRef} tabIndex="-1">W jakim jesteście składzie?</h1>
             <p className="step-lead">Potrzebujemy realnych opiekunów, nie tylko liczby biletów.</p>
+            <WizardIllustration step={step} />
             <div className="stepper-panel">
               <Stepper label="Dorośli" detail="pełnoletni opiekunowie" value={adults} min={1} max={6} onChange={(value) => setProfile((current) => ({ ...current, members: resizeMembers(current.members, "adult", value) }))} />
               <Stepper label="Dzieci i nastolatki" detail="każdą osobę opiszemy osobno" value={children} min={0} max={8} onChange={(value) => setProfile((current) => ({ ...current, members: resizeMembers(current.members, "child", value) }))} />
@@ -223,29 +356,32 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
         {step === 2 && (
           <>
             <p className="eyebrow">BEZPIECZEŃSTWO PRZEDE WSZYSTKIM</p>
-            <h1>Wiek i wzrost każdej osoby</h1>
+            <h1 ref={headingRef} tabIndex="-1">Wiek i wzrost każdej osoby</h1>
             <p className="step-lead">Nie zgaduj w górę. Obsługa i pomiar przy wejściu zawsze mają ostatnie słowo.</p>
+            <WizardIllustration step={step} />
             <div className="member-stack">
               {profile.members.map((member, index) => (
-                <article className={`member-card ${member.role}`} key={member.id}>
-                  <div className="member-card-title"><span>{index + 1}</span><strong>{member.role === "adult" ? "Dorosły" : "Dziecko / nastolatek"}</strong></div>
-                  <label className="wide-field"><span>Imię lub skrót — opcjonalnie</span><input type="text" maxLength="40" value={member.name} onChange={(event) => updateMember(member.id, "name", event.target.value)} /></label>
+                <article className={`member-card ${member.role}`} key={member.id} role="group" aria-labelledby={`member-title-${member.id}`}>
+                  <div className="member-card-title"><span>{index + 1}</span><strong id={`member-title-${member.id}`}>{member.role === "adult" ? "Dorosły" : "Dziecko / nastolatek"}</strong></div>
+                  <label className="wide-field"><span>Imię lub skrót — opcjonalnie</span><input type="text" maxLength="40" aria-label={`${memberLabel(member)}: imię lub skrót`} value={member.name} onChange={(event) => updateMember(member.id, "name", event.target.value)} /></label>
                   <div className="number-field-grid">
-                    <label><span>Wiek</span><div><input inputMode="numeric" type="number" min="0" max="110" value={member.age} onChange={(event) => updateMember(member.id, "age", Number(event.target.value))} /><em>lat</em></div></label>
-                    <label><span>Wzrost</span><div><input inputMode="numeric" type="number" min="50" max="230" value={member.height} onChange={(event) => updateMember(member.id, "height", Number(event.target.value))} /><em>cm</em></div></label>
+                    <label><span>Wiek</span><div><input inputMode="numeric" type="number" min="0" max="110" aria-label={`${memberLabel(member)}: wiek`} aria-invalid={member.role === "adult" ? Number(member.age) < 18 || Number(member.age) > 110 : Number(member.age) < 0 || Number(member.age) > 17} aria-describedby={!agesValid ? "age-validation-error" : undefined} value={member.age} onChange={(event) => updateMember(member.id, "age", Number(event.target.value))} /><em>lat</em></div></label>
+                    <label><span>Wzrost</span><div><input inputMode="numeric" type="number" min="50" max="230" aria-label={`${memberLabel(member)}: wzrost`} aria-invalid={Number(member.height) < 50 || Number(member.height) > 230} aria-describedby={!heightsValid ? "height-validation-error" : undefined} value={member.height} onChange={(event) => updateMember(member.id, "height", Number(event.target.value))} /><em>cm</em></div></label>
                   </div>
                 </article>
               ))}
             </div>
-            {!agesValid && <div className="warning-note"><WarningCircle size={21} weight="fill" /><span>Dorośli opiekunowie muszą mieć co najmniej 18 lat; w tej sekcji dzieci i nastolatki mają 0–17 lat.</span></div>}
+            {!agesValid && <div className="warning-note" id="age-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Dorośli opiekunowie muszą mieć co najmniej 18 lat; w tej sekcji dzieci i nastolatki mają 0–17 lat.</span></div>}
+            {!heightsValid && <div className="warning-note" id="height-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Podaj rzeczywisty wzrost każdej osoby w zakresie 50–230 cm.</span></div>}
           </>
         )}
 
         {step === 3 && (
           <>
             <p className="eyebrow">APETYT NA DZIEŃ</p>
-            <h1>Na co macie ochotę?</h1>
+            <h1 ref={headingRef} tabIndex="-1">Na co macie ochotę?</h1>
             <p className="step-lead">To nie jest filtr bezpieczeństwa — to sposób, żeby plan był faktycznie wasz.</p>
+            <WizardIllustration step={step} />
             <div className="choice-stack compact">
               <ChoiceCard title="Spokojnie" detail="widoki, łagodne przejazdy, więcej oddechu" icon={Sparkle} selected={profile.preferences.intensity === "calm"} onClick={() => updatePreferences({ intensity: "calm" })} />
               <ChoiceCard title="Po trochu" detail="rodzinne hity i kilka mocniejszych rzeczy" icon={Sparkle} selected={profile.preferences.intensity === "mixed"} onClick={() => updatePreferences({ intensity: "mixed" })} />
@@ -273,22 +409,24 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
         {step === 4 && (
           <>
             <p className="eyebrow">CZASEM WARTO PÓJŚĆ RÓWNOLEGLE</p>
-            <h1>Czy możemy rozdzielić grupę?</h1>
+            <h1 ref={headingRef} tabIndex="-1">Czy możemy rozdzielić grupę?</h1>
             <p className="step-lead">Każde dziecko zostaje z dorosłym. Zawsze podamy wspólne miejsce i godzinę spotkania.</p>
+            <WizardIllustration step={step} />
             <div className="choice-stack">
               <ChoiceCard title="Nie — zawsze razem" detail="plan zawiera wyłącznie atrakcje wspólne" icon={UsersThree} selected={effectiveSplitPolicy === "never"} onClick={() => setProfile((current) => ({ ...current, splitPolicy: "never" }))} />
               <ChoiceCard title="Raz, jeśli naprawdę warto" detail="np. Hyperion równolegle z atrakcją dla młodszych" icon={ArrowsSplit} disabled={guardians < 2} selected={effectiveSplitPolicy === "worthwhile"} onClick={() => setProfile((current) => ({ ...current, splitPolicy: "worthwhile" }))} />
               <ChoiceCard title="Tak — pokaż najlepszy wariant" detail="maksymalnie jeden bezpieczny podział dziennie" icon={ArrowsSplit} disabled={guardians < 2} selected={effectiveSplitPolicy === "often"} onClick={() => setProfile((current) => ({ ...current, splitPolicy: "often" }))} />
             </div>
-            {guardians < 2 && <div className="warning-note"><WarningCircle size={21} weight="fill" /><span>Podział wymaga co najmniej dwóch pełnoletnich opiekunów, więc dla tego składu jest wyłączony.</span></div>}
+            {guardians < 2 && <div className="warning-note" role="status"><WarningCircle size={21} weight="fill" /><span>Podział wymaga co najmniej dwóch pełnoletnich opiekunów, więc dla tego składu jest wyłączony.</span></div>}
           </>
         )}
 
         {step === 5 && (
           <>
             <p className="eyebrow">ENERGIA TEŻ JEST OGRANICZENIEM</p>
-            <h1>Jak jecie w parku?</h1>
+            <h1 ref={headingRef} tabIndex="-1">Jak jecie w parku?</h1>
             <p className="step-lead">Wstawimy przerwę w logicznym miejscu trasy, zamiast szukać obiadu po drugiej stronie parku.</p>
+            <WizardIllustration step={step} />
             <div className="choice-stack compact">
               <ChoiceCard title="Szybko, około 30 minut" detail="pizza lub szybki punkt blisko trasy" icon={ForkKnife} selected={profile.meal.mode === "fast"} onClick={() => setProfile((current) => ({ ...current, meal: { ...current.meal, mode: "fast" } }))} />
               <ChoiceCard title="Spokojny obiad" detail="około godziny i chwila prawdziwego odpoczynku" icon={ForkKnife} selected={profile.meal.mode === "sit-down"} onClick={() => setProfile((current) => ({ ...current, meal: { ...current.meal, mode: "sit-down" } }))} />
@@ -296,30 +434,33 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
               <ChoiceCard title="Bez planowania obiadu" detail="nie dodawaj przerwy do osi dnia" icon={ForkKnife} selected={profile.meal.mode === "none"} onClick={() => setProfile((current) => ({ ...current, meal: { ...current.meal, mode: "none" } }))} />
             </div>
             {profile.meal.mode !== "none" && <label className="single-time-field"><span>Najlepiej około</span><input type="time" value={profile.meal.time} onChange={(event) => setProfile((current) => ({ ...current, meal: { ...current.meal, time: event.target.value } }))} /></label>}
-            {!mealTimeValid && <div className="warning-note"><WarningCircle size={21} weight="fill" /><span>Wybierz porę posiłku mieszczącą się w godzinach wizyty.</span></div>}
+            {!mealTimeValid && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>Wybierz porę posiłku mieszczącą się w godzinach wizyty.</span></div>}
           </>
         )}
 
         {step === 6 && (
           <>
             <p className="eyebrow">OSTATNIE SPOJRZENIE</p>
-            <h1>Dobrze was rozumiemy?</h1>
+            <h1 ref={headingRef} tabIndex="-1">Dobrze was rozumiemy?</h1>
             <p className="step-lead">Plan najpierw pilnuje ograniczeń, później wspólnej zabawy, kolejek i marszu.</p>
+            <WizardIllustration step={step} />
             <div className="review-card">
               <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.dayCount} {profile.dayCount === 1 ? "dzień" : "dni"}</strong><small>{profile.arrivalTime}–{profile.departureTime} · tempo {profile.pace === "easy" ? "spokojne" : profile.pace === "fast" ? "szybkie" : "normalne"}</small></span></div>
               <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)} ${member.height} cm`).join(" · ")}</small></span></div>
               <div><Sparkle size={22} weight="duotone" /><span><strong>{profile.preferences.intensity === "thrill" ? "Mocny dzień" : profile.preferences.intensity === "calm" ? "Spokojny dzień" : "Po trochu"}</strong><small>kolejki do {profile.preferences.maxQueue} min · woda: {profile.preferences.wet === "avoid" ? "nie" : profile.preferences.wet === "want" ? "tak" : "może być"}</small></span></div>
               <div><ArrowsSplit size={22} weight="duotone" /><span><strong>{effectiveSplitPolicy === "never" ? "Zawsze razem" : effectiveSplitPolicy === "often" ? "Podział dozwolony" : "Jeden wartościowy podział"}</strong><small>{profile.meal.mode === "none" ? "bez zaplanowanego obiadu" : `obiad około ${profile.meal.time}`}</small></span></div>
             </div>
-            <button className="edit-review" type="button" onClick={() => setStep(0)}><PencilSimple size={18} /> Popraw odpowiedzi</button>
-            <p className="data-status"><span className={queueStatus === "ready" ? "ready" : ""} />{queueStatus === "ready" ? "Kolejki na żywo są gotowe do planowania." : "Plan powstanie także bez danych o kolejce."}</p>
+            <button className="edit-review" type="button" onClick={() => goToStep(0)}><PencilSimple size={18} /> Popraw odpowiedzi</button>
+            {generationError && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span><strong>Nie ma teraz bezpiecznej trasy dla tych ustawień.</strong><br />{generationError}</span></div>}
+            <p className="data-status" role="status"><span className={queueStatus === "ready" && freshness.state === "fresh" ? "ready" : ""} />{queueStatus === "loading" ? "Pobieram aktualne kolejki…" : queueStatus === "ready" ? `Migawka kolejek: ${freshness.label}${freshness.state === "stale" ? " — może być nieaktualna" : ""}.` : queueStatus === "stale" ? `Nie udało się odświeżyć; zachowuję ostatnią migawkę z ${freshness.label}.` : "Plan powstanie bez danych o kolejce."}</p>
+            <button className="edit-review" type="button" disabled={queueStatus === "loading"} onClick={onRefreshQueues}><Clock size={18} /> Odśwież kolejki</button>
           </>
         )}
       </section>
 
       <footer className="wizard-footer">
         {step < STEP_LABELS.length - 1 ? (
-          <button className="primary-button" type="button" disabled={!canContinue} onClick={() => setStep(step + 1)}>Dalej <ArrowRight size={20} weight="bold" /></button>
+          <button className="primary-button" type="button" disabled={!canContinue} onClick={() => goToStep(step + 1)}>Dalej <ArrowRight size={20} weight="bold" /></button>
         ) : (
           <button className="primary-button generate" type="button" onClick={onGenerate}><Sparkle size={20} weight="fill" /> Ułóż plan</button>
         )}
@@ -437,7 +578,7 @@ function PrintablePlan({ plan, planUrl }) {
           return <div className="print-step split" key={step.id}><strong>{formatPlanTime(step.startMin)} · {step.sequence} · PODZIAŁ</strong>{step.assignments.map((assignment) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; return <span key={assignment.attractionId}>{assignment.label}: <b>{ride.name}</b> — {assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</span>; })}<small>Spotkanie {step.reunion.time}: {step.reunion.label}</small></div>;
         })}</section>;
       })}
-      <footer><p><a href={planUrl}>Otwórz żywy plan w aplikacji</a> — pełny adres jest zapisany w tym hiperłączu.</p><p>Ograniczenia przy wejściu i decyzje obsługi parku mają pierwszeństwo. Kolejki są migawką z momentu planowania.</p></footer>
+      <footer><p><a href={planUrl}>Otwórz żywy plan w aplikacji</a> — pełny adres jest zapisany w tym hiperłączu.</p><p>Ten wydruk zawiera wpisane imiona, wiek i wzrost uczestników. Udostępniaj go świadomie.</p><p>Ograniczenia przy wejściu i decyzje obsługi parku mają pierwszeństwo. Kolejki są migawką z momentu planowania.</p></footer>
     </article>
   );
 }
@@ -446,6 +587,7 @@ function PlanView({ plan, onEdit }) {
   const [selectedDay, setSelectedDay] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [showToilets, setShowToilets] = useState(false);
+  const { position, status: locationStatus, locate } = useUserLocation();
   const completedKey = useMemo(() => `${COMPLETED_KEY}:${String(plan.generatedAt || "plan").slice(0, 40)}`, [plan.generatedAt]);
   const [completedIds, setCompletedIds] = useState(() => {
     const stored = readStored(completedKey, []);
@@ -453,15 +595,20 @@ function PlanView({ plan, onEdit }) {
   });
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState("");
+  const shareUrlRef = useRef(null);
   const day = annotatedDay(plan.days[selectedDay] ?? plan.days[0] ?? { steps: [], stats: {} });
   const mapItems = planMapItems(day);
   const planUrl = useMemo(() => createPlanUrl(plan), [plan]);
-  const nextAttractionId = plan.days.flatMap((item) => item.steps).flatMap((step) => {
+  const dayAttractionIds = day.steps.flatMap((step) => {
     if (step.kind === "ride") return [step.attractionId];
     if (step.kind === "split") return step.assignments.map((assignment) => assignment.attractionId);
     return [];
-  }).find((id) => !completedIds.includes(id));
+  });
+  const nextAttractionId = dayAttractionIds.find((id) => !completedIds.includes(id));
   const firstRide = ALL_ATTRACTIONS_BY_ID[nextAttractionId];
+  const firstRideDistance = firstRide ? distanceCopy(position, firstRide) : null;
+  const completedToday = dayAttractionIds.filter((id) => completedIds.includes(id)).length;
+  const queueSnapshot = queueFreshness(plan.queueSnapshotAt);
   const selectedAttraction = selectedId ? ALL_ATTRACTIONS_BY_ID[selectedId] : null;
   const selectedMapItem = mapItems.find((item) => item.id === selectedId);
   const selectedAssignment = day.steps.flatMap((step) => {
@@ -472,8 +619,14 @@ function PlanView({ plan, onEdit }) {
 
   useEffect(() => writeStored(completedKey, completedIds), [completedIds, completedKey]);
   useEffect(() => { if (notice) { const timeout = window.setTimeout(() => setNotice(""), 2400); return () => window.clearTimeout(timeout); } return undefined; }, [notice]);
+  useEffect(() => setSelectedId(null), [selectedDay]);
 
-  const toggleCompleted = (id) => setCompletedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+  const toggleCompleted = (id) => {
+    const attraction = ALL_ATTRACTIONS_BY_ID[id];
+    const wasCompleted = completedIds.includes(id);
+    setCompletedIds((current) => wasCompleted ? current.filter((item) => item !== id) : [...current, id]);
+    setNotice(wasCompleted ? `Przywrócono: ${attraction?.name ?? "atrakcja"}` : `Zaliczone: ${attraction?.name ?? "atrakcja"}`);
+  };
   const closeDetail = useCallback(() => setSelectedId(null), []);
   const share = async () => {
     try {
@@ -488,7 +641,11 @@ function PlanView({ plan, onEdit }) {
     }
   };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(planUrl); setNotice("Link skopiowany"); } catch { setNotice("Zaznacz i skopiuj link ręcznie"); }
+    try { await navigator.clipboard.writeText(planUrl); setNotice("Link skopiowany"); } catch {
+      shareUrlRef.current?.focus();
+      shareUrlRef.current?.select();
+      setNotice("Link zaznaczony — wybierz Kopiuj");
+    }
   };
   const openEmail = (event) => {
     event.preventDefault();
@@ -501,17 +658,22 @@ function PlanView({ plan, onEdit }) {
       <main className="plan-shell screen-app">
         <header className="plan-topbar"><div><p className="eyebrow">PLAN DLA WAS</p><h1>Wasza Energylandia</h1></div><button type="button" onClick={onEdit}><PencilSimple size={17} /> Zmień</button></header>
         {!plan.safety?.valid && <div className="safety-alert"><WarningCircle size={22} weight="fill" /><span><strong>Plan wymaga poprawy</strong><small>{plan.safety?.issues?.[0]}</small></span></div>}
-        <section className="plan-hero">
-          <p>{plan.days.length} {plan.days.length === 1 ? "DZIEŃ" : "DNI"} • {plan.profile.members.length} OSÓB</p>
-          <h2>{firstRide ? <>{completedIds.length > 0 ? "Teraz czas na" : "Zacznijcie od"}<br /><em>{firstRide.name}</em></> : "Plan zaliczony"}</h2>
-          <span>{firstRide ? "Najpierw bezpieczeństwo, potem zgodność z waszym apetytem, kolejki i logiczny marsz." : "Wszystkie zaplanowane atrakcje są już oznaczone jako zaliczone."}</span>
+        <section className="plan-hero" aria-live="polite">
+          <p>DZIEŃ {day.day ?? selectedDay + 1} Z {plan.days.length} • {plan.profile.members.length} OSÓB</p>
+          <h2>{firstRide ? <>{completedToday > 0 ? "Teraz czas na" : "Zacznijcie od"}<br /><em>{firstRide.name}</em></> : `Dzień ${day.day ?? selectedDay + 1} zaliczony`}</h2>
+          <span>{firstRide ? "Najpierw bezpieczeństwo, potem zgodność z waszym apetytem, kolejki i logiczny marsz." : "Wszystkie atrakcje zaplanowane na ten dzień są już oznaczone jako zaliczone."}</span>
+          {firstRideDistance && <small className="hero-distance"><Footprints size={16} weight="duotone" /> {firstRideDistance}</small>}
+          {firstRide && <button className="hero-next-button" type="button" aria-haspopup="dialog" onClick={() => setSelectedId(firstRide.id)}>Opis i prowadzenie <CaretRight size={18} /></button>}
         </section>
-        <nav className="day-tabs" aria-label="Dni planu">{plan.days.map((item, index) => <button key={item.day} type="button" className={selectedDay === index ? "selected" : ""} aria-pressed={selectedDay === index} aria-current={selectedDay === index ? "page" : undefined} onClick={() => setSelectedDay(index)}>Dzień {item.day}<small>{item.stats.attractions} atrakcji</small></button>)}</nav>
+        <nav className="day-tabs" aria-label="Dni planu">{plan.days.map((item, index) => <button key={item.day} type="button" className={selectedDay === index ? "selected" : ""} aria-pressed={selectedDay === index} aria-current={selectedDay === index ? "step" : undefined} onClick={() => { setSelectedDay(index); setNotice(`Pokazuję dzień ${item.day}`); }}>Dzień {item.day}<small>{item.stats.attractions} atrakcji</small></button>)}</nav>
 
         <section className="plan-map-card" aria-labelledby="map-title">
-          <div className="section-heading"><div><p className="eyebrow">TRASA NA DZISIAJ</p><h2 id="map-title">Mapa dnia</h2></div><button type="button" className={showToilets ? "active" : ""} aria-pressed={showToilets} onClick={() => setShowToilets((value) => !value)}><Toilet size={18} weight="fill" /> WC</button></div>
-          <PlannerMap items={mapItems} toilets={TOILETS} completedIds={completedIds} selectedId={selectedId} showToilets={showToilets} onSelect={(ride) => setSelectedId(ride.id)} />
-          <div className="day-stats"><span><Clock size={16} /> {day.stats.start}–{day.stats.end}</span><span><MapTrifold size={16} /> ~{day.stats.walkingMinutes} min marszu</span><span><CheckCircle size={16} /> {completedIds.filter((id) => mapItems.some((item) => item.id === id)).length}/{mapItems.length}</span></div>
+          <div className="section-heading"><div><p className="eyebrow">TRASA NA DZISIAJ</p><h2 id="map-title">Mapa dnia</h2></div><div className="map-controls"><button type="button" className={`location-control ${locationStatus === "ready" ? "active" : ""}`} onClick={locate}><Crosshair size={18} weight="bold" /> {locationStatus === "loading" ? "Szukam…" : locationStatus === "ready" ? "GPS" : "Odległości"}</button><button type="button" className={showToilets ? "active" : ""} aria-pressed={showToilets} onClick={() => setShowToilets((value) => !value)}><Toilet size={18} weight="fill" /> WC</button></div></div>
+          <PlannerMap items={mapItems} toilets={TOILETS} completedIds={completedIds} selectedId={selectedId} position={position} showToilets={showToilets} onSelect={(ride) => setSelectedId(ride.id)} />
+          {locationStatus === "idle" && <p className="location-message">Włącz „Odległości”, aby zobaczyć metry i orientacyjny czas dojścia przy każdej atrakcji.</p>}
+          {(locationStatus === "denied" || locationStatus === "error" || locationStatus === "unsupported") && <p className="location-message warning" role="status">Nie mam dostępu do pozycji telefonu. Włącz lokalizację dla tej strony w ustawieniach przeglądarki.</p>}
+          <div className="day-stats"><span><Clock size={16} /> {day.stats.start}–{day.stats.end}</span><span><MapTrifold size={16} /> ~{day.stats.walkingMinutes} min marszu</span><span><CheckCircle size={16} /> {completedToday}/{dayAttractionIds.length}</span></div>
+          <p className="queue-snapshot">Kolejki: {queueSnapshot.label}{queueSnapshot.state === "stale" ? " — traktuj jako orientacyjne" : ""}.</p>
         </section>
 
         <section className="timeline-section" aria-labelledby="timeline-title">
@@ -523,18 +685,19 @@ function PlanView({ plan, onEdit }) {
               if (step.kind === "ride") {
                 const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId];
                 const completed = completedIds.includes(ride.id);
-                return <article className={`timeline-ride ${completed ? "completed" : ""}`} key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><button className="ride-content" type="button" onClick={() => setSelectedId(ride.id)}><span className="route-number">{step.sequence}</span><span><em>WSZYSCY • {zoneLabel(ride.zone)}</em><h3>{ride.name}</h3><p>{attractionLabel(ride)}{Number.isFinite(step.queueMinutes) ? ` · kolejka ${step.queueMinutes} min` : ""}</p></span><CaretRight size={18} /></button><button className="complete-button" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={24} weight={completed ? "fill" : "regular"} /></button></article>;
+                const liveDistance = distanceCopy(position, ride);
+                return <article className={`timeline-ride ${completed ? "completed" : ""}`} key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><button className="ride-content" type="button" onClick={() => setSelectedId(ride.id)}><span className="route-number">{step.sequence}</span><span><em>WSZYSCY • {zoneLabel(ride.zone)}</em><h3>{ride.name}</h3><p>{attractionLabel(ride)}{Number.isFinite(step.queueMinutes) ? ` · kolejka ${step.queueMinutes} min` : ""}</p>{liveDistance && <small className="distance-meta"><Footprints size={13} weight="duotone" /> {liveDistance}</small>}</span><CaretRight size={18} /></button><button className="complete-button" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={24} weight={completed ? "fill" : "regular"} /></button></article>;
               }
-              return <article className="timeline-split" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="split-heading"><span className="route-number">{step.sequence}</span><div><em>PODZIAŁ GRUPY</em><h3>Dwie dobre trasy obok siebie</h3></div></div><div className="split-assignments">{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const completed = completedIds.includes(ride.id); return <div className={completed ? "completed" : ""} key={assignment.attractionId}><button className="split-detail" type="button" onClick={() => setSelectedId(ride.id)}><span>{step.sequence}{index === 0 ? "A" : "B"}</span><div><em>{assignment.label}</em><strong>{ride.name}</strong><small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(" · ")}</small></div><CaretRight size={17} /></button><button className="split-complete" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={22} weight={completed ? "fill" : "regular"} /></button></div>; })}</div><p className="reunion"><MapPin size={16} weight="fill" /><span><strong>{step.reunion.time}</strong> · {step.reunion.label}</span></p></article>;
+              return <article className="timeline-split" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="split-heading"><span className="route-number">{step.sequence}</span><div><em>PODZIAŁ GRUPY</em><h3>Dwie dobre trasy obok siebie</h3></div></div><div className="split-assignments">{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const completed = completedIds.includes(ride.id); const liveDistance = distanceCopy(position, ride); return <div className={completed ? "completed" : ""} key={assignment.attractionId}><button className="split-detail" type="button" onClick={() => setSelectedId(ride.id)}><span>{step.sequence}{index === 0 ? "A" : "B"}</span><div><em>{assignment.label}</em><strong>{ride.name}</strong><small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(" · ")}</small>{liveDistance && <small className="distance-meta"><Footprints size={13} weight="duotone" /> {liveDistance}</small>}</div><CaretRight size={17} /></button><button className="split-complete" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={22} weight={completed ? "fill" : "regular"} /></button></div>; })}</div><p className="reunion"><MapPin size={16} weight="fill" /><span><strong>{step.reunion.time}</strong> · {step.reunion.label}</span></p></article>;
             })}
           </div>
         </section>
 
         <section className="export-section" aria-labelledby="export-title">
-          <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>Link zachowuje wyliczoną kolejność, także jeśli kolejki później się zmienią.</p>
+          <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>Link nie zawiera imion ani bieżącej lokalizacji, ale zachowuje wiek, wzrost i role potrzebne do sprawdzenia bezpieczeństwa. Stan „zaliczone” zostaje tylko na tym telefonie.</p>
           <div className="export-actions"><button type="button" onClick={share}><ShareNetwork size={21} weight="bold" /> Udostępnij plan</button><button type="button" onClick={copy}><Copy size={21} weight="bold" /> Kopiuj link</button><button type="button" onClick={() => window.print()}><Printer size={21} weight="bold" /> Drukuj / zapisz PDF</button></div>
-          <form className="email-box" onSubmit={openEmail}><label><span>Adres e-mail</span><input type="email" required placeholder="np. rodzina@example.com" value={email} onChange={(event) => setEmail(event.target.value)} /></label><button type="submit"><EnvelopeSimple size={20} weight="bold" /> Otwórz szkic e-maila</button><small>Nie wysyłamy ani nie zapisujemy adresu. Otworzymy aplikację pocztową z pełną rozpiską; PDF możesz zapisać powyżej i dołączyć do wiadomości.</small></form>
-          <input className="share-url" readOnly value={planUrl} aria-label="Link do planu" />
+          <form className="email-box" onSubmit={openEmail}><label><span>Adres e-mail</span><input type="email" required placeholder="np. rodzina@example.com" value={email} onChange={(event) => setEmail(event.target.value)} /></label><button type="submit"><EnvelopeSimple size={20} weight="bold" /> Otwórz szkic e-maila</button><small>Nie wysyłamy ani nie zapisujemy adresu. Szkic pocztowy zawiera pełną rozpiskę i wpisane nazwy uczestników; PDF możesz zapisać powyżej i dołączyć samodzielnie.</small></form>
+          <input ref={shareUrlRef} className="share-url" readOnly value={planUrl} aria-label="Link do planu" />
         </section>
         <footer className="app-footer">Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji, OpenStreetMap i Queue-Times.</footer>
         {notice && <div className="toast" role="status">{notice}</div>}
@@ -546,26 +709,53 @@ function PlanView({ plan, onEdit }) {
 }
 
 export function App() {
-  const sharedPlan = useMemo(() => planFromHash(), []);
-  const storedPlan = useMemo(() => sanitizeSharedPlan(readStored(PLAN_KEY, null)), []);
+  const sharedHashPresent = useMemo(() => /(?:^|[#&])plan=/.test(window.location.hash), []);
+  const sharedPlan = useMemo(() => {
+    try { return planFromHash(); } catch { return null; }
+  }, []);
+  const storedPlan = useMemo(() => safeSanitizePlan(readStored(PLAN_KEY, null)), []);
   const [screen, setScreen] = useState(sharedPlan ? "plan" : "welcome");
   const [step, setStep] = useState(0);
-  const [profile, setProfile] = useState(() => readStored(DRAFT_KEY, DEFAULT_PROFILE) ?? DEFAULT_PROFILE);
+  const [profile, setProfile] = useState(() => normalizeDraftProfile(readStored(DRAFT_KEY, DEFAULT_PROFILE), DEFAULT_PROFILE));
   const [plan, setPlan] = useState(sharedPlan);
   const [queues, setQueues] = useState(null);
   const [queueStatus, setQueueStatus] = useState("loading");
+  const [generationError, setGenerationError] = useState("");
+  const queuesRef = useRef(null);
 
   useEffect(() => writeStored(DRAFT_KEY, profile), [profile]);
-  useEffect(() => {
+  const refreshQueues = useCallback(async () => {
     const controller = new AbortController();
-    loadQueueTimes(controller.signal).then((data) => { setQueues(data); setQueueStatus("ready"); }).catch((error) => { if (error.name !== "AbortError") setQueueStatus("error"); });
-    return () => controller.abort();
+    setQueueStatus("loading");
+    try {
+      const data = await loadQueueTimes(controller.signal);
+      queuesRef.current = data;
+      setQueues(data);
+      setQueueStatus("ready");
+    } catch (error) {
+      if (error.name !== "AbortError") setQueueStatus(queuesRef.current ? "stale" : "error");
+    }
+    return controller;
   }, []);
+  useEffect(() => {
+    let controller;
+    refreshQueues().then((value) => { controller = value; });
+    return () => controller?.abort();
+  }, [refreshQueues]);
 
   const queueById = useMemo(() => Object.fromEntries(Object.values(ALL_ATTRACTIONS_BY_ID).map((attraction) => [attraction.id, queueForAttraction(attraction, queues)])), [queues]);
   const generate = useCallback(() => {
-    const safeProfile = profile.members.filter(isGuardian).length < 2 ? { ...profile, splitPolicy: "never" } : profile;
+    setGenerationError("");
+    const normalizedProfile = normalizeDraftProfile(profile, DEFAULT_PROFILE);
+    const safeProfile = normalizedProfile.members.filter(isGuardian).length < 2 ? { ...normalizedProfile, splitPolicy: "never" } : normalizedProfile;
     const nextPlan = buildUniversalPlan({ ...safeProfile, queueSnapshotAt: queues?.updatedAt ?? null }, { queueById });
+    if (countPlanAttractions(nextPlan) === 0) {
+      setGenerationError("Podnieś limit kolejki, poluzuj tryb „spokojnie” lub sprawdź wzrost i wiek uczestników. Nie udostępnimy pustego linku udającego plan.");
+      setStep(STEP_LABELS.length - 1);
+      setScreen("onboarding");
+      window.scrollTo({ top: 0, behavior: "auto" });
+      return;
+    }
     setPlan(nextPlan);
     writeStored(PLAN_KEY, nextPlan);
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
@@ -574,10 +764,10 @@ export function App() {
   }, [profile, queueById, queues]);
 
   if (screen === "welcome") {
-    return <main className="welcome-shell screen-app"><div className="welcome-material"><header><span>PLAN DLA WAS</span><em>ENERGYLANDIA • BETA</em></header><section><p className="eyebrow">NIE KOLEJNY KATALOG ATRAKCJI</p><h1>Ułóżmy wam<br /><i>dobry dzień.</i></h1><p>Plan dopasowany do składu, wzrostu, wieku, kolejek i tego, na co naprawdę macie ochotę.</p><div className="welcome-benefits"><span><Ruler size={18} /> ograniczenia każdej osoby</span><span><ArrowsSplit size={18} /> bezpieczne podziały grupy</span><span><ForkKnife size={18} /> obiad we właściwym miejscu</span></div></section><footer><button className="primary-button" type="button" onClick={() => { setStep(0); setScreen("onboarding"); }}>Zaczynamy <ArrowRight size={20} weight="bold" /></button>{storedPlan && <button className="resume-button" type="button" onClick={() => { setPlan(storedPlan); setScreen("plan"); }}>Wróć do zapisanego planu</button>}<small>Bez konta. Odpowiedzi zostają tylko w tej przeglądarce.</small></footer></div><div className="welcome-orbit" aria-hidden="true"><span>1</span><span>2</span><span>3</span></div></main>;
+    return <main className="welcome-shell screen-app"><div className="welcome-material"><header><span>PLAN DLA WAS</span><em>ENERGYLANDIA • BETA</em></header><section><p className="eyebrow">NIE KOLEJNY KATALOG ATRAKCJI</p><h1>Ułóżmy wam<br /><i>dobry dzień.</i></h1><p>Plan dopasowany do składu, wzrostu, wieku, kolejek i tego, na co naprawdę macie ochotę.</p>{sharedHashPresent && !sharedPlan && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>Ten link do planu jest uszkodzony albo pochodzi ze starszej wersji. Możesz ułożyć nową trasę poniżej.</span></div>}<div className="welcome-benefits"><span><Ruler size={18} /> ograniczenia każdej osoby</span><span><ArrowsSplit size={18} /> bezpieczne podziały grupy</span><span><ForkKnife size={18} /> obiad we właściwym miejscu</span></div></section><footer><button className="primary-button" type="button" onClick={() => { setGenerationError(""); setStep(0); setScreen("onboarding"); }}>Zaczynamy <ArrowRight size={20} weight="bold" /></button>{storedPlan && <button className="resume-button" type="button" onClick={() => { setPlan(storedPlan); setScreen("plan"); }}>Wróć do zapisanego planu</button>}<small>Bez konta. Odpowiedzi i lokalizacja zostają w tej przeglądarce. Link bez imion i lokalizacji nadal zawiera wiek oraz wzrost potrzebne do ułożenia bezpiecznej trasy.</small></footer></div><div className="welcome-orbit" aria-hidden="true"><span>1</span><span>2</span><span>3</span></div></main>;
   }
 
-  if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} />;
+  if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={refreshQueues} generationError={generationError} />;
   if (!plan) return null;
-  return <PlanView plan={plan} onEdit={() => { setProfile(plan.profile); setStep(0); setScreen("onboarding"); }} />;
+  return <PlanView plan={plan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
 }

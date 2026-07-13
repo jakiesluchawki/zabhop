@@ -1,3 +1,5 @@
+import { evaluateRainAlert, RAIN_ALERT_STATE } from "./rainAlert.js";
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 function stepSeverity(value, steps, fallback = 0.45) {
@@ -121,25 +123,31 @@ export function evaluateWindow(hours, options = {}) {
   let antistormStatus = "zielony";
   let overrideLabel = null;
   if (options.applyAntistorm && options.antistorm) {
-    const stormProbability = Number(options.antistorm.p_b) || 0;
-    const rainProbability = Number(options.antistorm.p_o) || 0;
-    const stormEta = Number(options.antistorm.t_b);
-    const rainEta = Number(options.antistorm.t_o);
-    const stormEtaKnown = Number.isFinite(stormEta) && stormEta >= 0 && stormEta < 255;
-    const rainEtaKnown = Number.isFinite(rainEta) && rainEta >= 0 && rainEta < 255;
+    const liveAlert = evaluateRainAlert({
+      antistorm: options.antistorm,
+      antistormCheckedAt: options.antistorm.updatedAt,
+      hours,
+      now: options.now || new Date(),
+      carWalkMinutes: 30,
+    });
+    const evidence = liveAlert.evidence.find((item) => item.source === "antistorm");
+    const strongUnknownEtaSignal = evidence
+      && Math.max(evidence.rainSignal || 0, evidence.stormSignal || 0) >= 30
+      && evidence.rainEta == null
+      && evidence.stormEta == null;
 
-    if (stormProbability >= 70 && stormEtaKnown && stormEta <= 60) {
+    if (liveAlert.state === RAIN_ALERT_STATE.RAINING || liveAlert.state === RAIN_ALERT_STATE.LEAVE_NOW) {
       antistormStatus = "czerwony";
       score = Math.min(score, 15);
-      overrideLabel = "NIE JEDŹ TERAZ — BURZA BLISKO";
-    } else if (
-      (stormProbability >= 30 && stormEtaKnown && stormEta <= 120)
-      || (stormProbability >= 70 && !stormEtaKnown)
-      || (rainProbability >= 60 && rainEtaKnown && rainEta <= 120)
-    ) {
+      overrideLabel = liveAlert.state === RAIN_ALERT_STATE.RAINING
+        ? "NIE JEDŹ TERAZ — OPAD JUŻ JEST"
+        : `NIE JEDŹ TERAZ — ${liveAlert.hazard === "storm" ? "BURZA" : "OPAD"} BLISKO`;
+    } else if ((Number.isFinite(liveAlert.etaMinutes) && liveAlert.etaMinutes <= 120) || strongUnknownEtaSignal) {
       antistormStatus = "żółty";
       score = Math.min(score, 44);
       overrideLabel = "WSTRZYMAJ DECYZJĘ — SPRAWDŹ ZA 15 MIN";
+    } else if (liveAlert.state === RAIN_ALERT_STATE.UNAVAILABLE) {
+      antistormStatus = "brak";
     }
   }
 

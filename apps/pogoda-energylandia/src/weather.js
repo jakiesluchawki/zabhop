@@ -151,7 +151,7 @@ async function fetchIcm() {
   };
 }
 
-async function fetchAntistorm() {
+export async function loadAntistormNowcast() {
   const response = await fetchWithTimeout("https://antistorm.eu/webservice.php?id=385");
   const raw = await response.text();
   const json = JSON.parse(raw.trim());
@@ -229,7 +229,7 @@ export async function loadWeather() {
     fetchMetNorway(),
     fetchBrightSky(today, dayAfterTomorrow),
     fetchIcm(),
-    fetchAntistorm(),
+    loadAntistormNowcast(),
   ]);
 
   const openMeteo = openMeteoResult.status === "fulfilled" ? openMeteoResult.value : null;
@@ -239,7 +239,7 @@ export async function loadWeather() {
   const antistorm = antistormResult.status === "fulfilled" ? antistormResult.value : null;
 
   const sources = [
-    sourceRecord("ICM UM 4 km", icmResult, () => "Meteorogram Zator • źródło obowiązkowe", "Meteorogram chwilowo niedostępny", icm?.pageUrl),
+    sourceRecord("ICM UM 4 km", icmResult, () => "Trend na dzień • przebieg modelu, nie alert", "Meteorogram chwilowo niedostępny", icm?.pageUrl),
     sourceRecord("Open-Meteo", openMeteoResult, () => "Prognoza godzinowa • Zator", "Brak odpowiedzi API", "https://open-meteo.com/"),
     sourceRecord("MET Norway", metResult, () => "Locationforecast • Zator", "Brak odpowiedzi API", "https://api.met.no/"),
     sourceRecord("DWD / Bright Sky", brightSkyResult, () => "Niemiecki model DWD • Zator", "Brak odpowiedzi API", "https://brightsky.dev/"),

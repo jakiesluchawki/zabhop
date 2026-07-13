@@ -17,10 +17,11 @@ const COASTERS = new Set([
   "rmf-dragon",
   "boomerang",
   "energus",
+  "frutti-loop",
 ]);
 
-const SPINNING = new Set(["candy-carousel", "stormy-ship", "wonder-wheel"]);
-const SCENIC = new Set(["wonder-wheel", "grotto-expedition"]);
+const SPINNING = new Set(["candy-carousel", "stormy-ship", "wonder-wheel", "mokate-twist", "bon-bon-balloon", "crazy-barn"]);
+const SCENIC = new Set(["wonder-wheel", "grotto-expedition", "bumble-boats", "bon-bon-balloon", "viking-ride", "swiss-water-cups"]);
 
 function accessRulesFrom(restrictions = {}) {
   const rules = [];
@@ -72,7 +73,7 @@ function thrillLevelFor(attraction) {
 function enrichBaseAttraction(attraction) {
   return Object.freeze({
     ...attraction,
-    officialNumber: null,
+    officialNumber: attraction.officialNumber ?? null,
     thrillLevel: thrillLevelFor(attraction),
     tags: tagsFor(attraction),
     accessRules: accessRulesFrom(attraction.restrictions),

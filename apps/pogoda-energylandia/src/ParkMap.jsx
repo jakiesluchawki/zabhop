@@ -144,7 +144,7 @@ export function ParkMap({
     if (userPoint) {
       if (Number.isFinite(position.accuracy)) {
         L.circle(userPoint, {
-          radius: Math.min(position.accuracy, 120),
+          radius: Math.min(position.accuracy, 1000),
           color: "#7442d9",
           weight: 1,
           fillColor: "#7442d9",

@@ -7,13 +7,27 @@ const RESTAURANT_IDS = new Set(RESTAURANTS.map((restaurant) => restaurant.id));
 const RESTAURANTS_BY_ID = Object.fromEntries(RESTAURANTS.map((restaurant) => [restaurant.id, restaurant]));
 const VALID_INTERESTS = new Set(["coasters", "water", "family", "scenic"]);
 
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
 function finiteOr(value, fallback = 0) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
+  if (value === null || value === undefined || value === "") return fallback;
+  try {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function validTime(value, fallback) {
-  return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value ?? "") ? value : fallback;
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : fallback;
+}
+
+function planMinute(value) {
+  const minute = finiteOr(value, NaN);
+  return Number.isInteger(minute) && minute >= 0 && minute < 24 * 60 ? minute : null;
 }
 
 function toBase64Url(value) {
@@ -32,10 +46,11 @@ function fromBase64Url(value) {
 }
 
 function cleanMember(member, index) {
-  if (!member || typeof member !== "object") return null;
-  const role = member.role === "child" ? "child" : "adult";
-  const height = Number(member.height);
-  const age = Number(member.age);
+  if (!isRecord(member)) return null;
+  if (member.role !== "adult" && member.role !== "child") return null;
+  const role = member.role;
+  const height = finiteOr(member.height, NaN);
+  const age = finiteOr(member.age, NaN);
   if (!Number.isFinite(height) || height < 50 || height > 230) return null;
   if (!Number.isFinite(age) || age < 0 || age > 110) return null;
   return {
@@ -48,11 +63,11 @@ function cleanMember(member, index) {
 }
 
 function sanitizeStep(step, dayIndex, stepIndex) {
-  if (!step || typeof step !== "object") return null;
+  if (!isRecord(step)) return null;
   const id = String(step.id || `day-${dayIndex + 1}-step-${stepIndex + 1}`).slice(0, 100);
-  const startMin = Number(step.startMin);
-  const endMin = Number(step.endMin);
-  if (!Number.isFinite(startMin) || !Number.isFinite(endMin) || endMin <= startMin) return null;
+  const startMin = planMinute(step.startMin);
+  const endMin = planMinute(step.endMin);
+  if (startMin === null || endMin === null || endMin <= startMin) return null;
 
   if (step.kind === "meal") {
     const restaurantId = RESTAURANT_IDS.has(step.restaurantId) ? step.restaurantId : null;
@@ -83,7 +98,7 @@ function sanitizeStep(step, dayIndex, stepIndex) {
 
   if (step.kind === "ride") {
     const attraction = ALL_ATTRACTIONS_BY_ID[step.attractionId];
-    if (!attraction) return null;
+    if (!attraction || !Array.isArray(step.memberIds) || step.memberIds.length > MAX_MEMBERS) return null;
     return {
       id,
       kind: "ride",
@@ -95,23 +110,22 @@ function sanitizeStep(step, dayIndex, stepIndex) {
       startMin,
       endMin,
       walkingMinutes: Math.max(0, Math.min(180, finiteOr(step.walkingMinutes, 0))),
-      queueMinutes: step.queueMinutes !== null && step.queueMinutes !== undefined && Number.isFinite(Number(step.queueMinutes))
-        ? Math.max(0, Math.min(600, Number(step.queueMinutes)))
+      queueMinutes: step.queueMinutes !== null && step.queueMinutes !== undefined && Number.isFinite(finiteOr(step.queueMinutes, NaN))
+        ? Math.max(0, Math.min(600, finiteOr(step.queueMinutes, 0)))
         : null,
-      memberIds: Array.isArray(step.memberIds) ? step.memberIds.map(String).slice(0, MAX_MEMBERS) : [],
+      memberIds: step.memberIds.map(String),
     };
   }
 
   if (step.kind === "split") {
-    if (!ALL_ATTRACTIONS_BY_ID[step.attractionId] || !ALL_ATTRACTIONS_BY_ID[step.alternativeAttractionId]) return null;
-    const assignments = Array.isArray(step.assignments)
-      ? step.assignments.slice(0, 2).map((assignment) => ({
+    if (!ALL_ATTRACTIONS_BY_ID[step.attractionId] || !ALL_ATTRACTIONS_BY_ID[step.alternativeAttractionId] || !Array.isArray(step.assignments) || step.assignments.length !== 2) return null;
+    const assignments = step.assignments
+      .map((assignment) => isRecord(assignment) && Array.isArray(assignment.memberIds) && assignment.memberIds.length <= MAX_MEMBERS ? ({
         label: String(assignment.label || "Podgrupa").slice(0, 60),
         attractionId: ALL_ATTRACTIONS_BY_ID[assignment.attractionId] ? assignment.attractionId : null,
-        memberIds: Array.isArray(assignment.memberIds) ? assignment.memberIds.map(String).slice(0, MAX_MEMBERS) : [],
-      }))
-      : [];
-    if (assignments.length !== 2 || assignments.some((assignment) => !assignment.attractionId)) return null;
+        memberIds: assignment.memberIds.map(String),
+      }) : null);
+    if (assignments.length !== 2 || assignments.some((assignment) => !assignment?.attractionId)) return null;
     const mainAttraction = ALL_ATTRACTIONS_BY_ID[assignments[0].attractionId];
     return {
       id,
@@ -135,9 +149,10 @@ function sanitizeStep(step, dayIndex, stepIndex) {
 }
 
 export function sanitizeSharedPlan(input) {
-  if (!input || input.version !== 1 || !input.profile || !Array.isArray(input.days) || input.days.length < 1 || input.days.length > 3) return null;
-  const members = (input.profile.members ?? []).slice(0, MAX_MEMBERS).map(cleanMember).filter(Boolean);
-  if (members.length === 0 || !members.some((member) => member.role === "adult" && member.age >= 18)) return null;
+  if (!isRecord(input) || input.version !== 1 || !isRecord(input.profile) || !Array.isArray(input.days) || input.days.length < 1 || input.days.length > 3) return null;
+  if (!Array.isArray(input.profile.members) || input.profile.members.length < 1 || input.profile.members.length > MAX_MEMBERS) return null;
+  const members = input.profile.members.map(cleanMember);
+  if (members.some((member) => member === null) || !members.some((member) => member.role === "adult" && member.age >= 18)) return null;
   if (new Set(members.map((member) => member.id)).size !== members.length) return null;
 
   const arrivalTime = validTime(input.profile.arrivalTime, "10:00");
@@ -146,6 +161,11 @@ export function sanitizeSharedPlan(input) {
   const departure = timeToMinutes(departureTime, 1200);
   if (departure <= arrival + 59) return null;
 
+  const requestedMealTime = validTime(input.profile.meal?.time, "13:15");
+  const requestedMealMinute = timeToMinutes(requestedMealTime, 795);
+  const mealTime = requestedMealMinute > arrival && requestedMealMinute < departure
+    ? requestedMealTime
+    : formatPlanTime(Math.round((arrival + departure) / 2));
   const profile = {
     dayCount: input.days.length,
     arrivalTime,
@@ -162,17 +182,41 @@ export function sanitizeSharedPlan(input) {
     },
     meal: {
       mode: new Set(["fast", "sit-down", "own", "none"]).has(input.profile.meal?.mode) ? input.profile.meal.mode : "fast",
-      time: validTime(input.profile.meal?.time, "13:15"),
+      time: mealTime,
     },
     members,
   };
 
-  const days = input.days.map((day, dayIndex) => {
-    const steps = (day.steps ?? []).slice(0, MAX_STEPS_PER_DAY)
-      .map((step, stepIndex) => sanitizeStep(step, dayIndex, stepIndex))
-      .filter(Boolean);
+  const seenStepIds = new Set();
+  const seenAttractionIds = new Set();
+  let attractionCount = 0;
+  const days = [];
+  for (let dayIndex = 0; dayIndex < input.days.length; dayIndex += 1) {
+    const day = input.days[dayIndex];
+    if (!isRecord(day) || !Array.isArray(day.steps) || day.steps.length > MAX_STEPS_PER_DAY) return null;
+    const steps = [];
+    let mealCount = 0;
+    let flexCount = 0;
+    for (let stepIndex = 0; stepIndex < day.steps.length; stepIndex += 1) {
+      const step = sanitizeStep(day.steps[stepIndex], dayIndex, stepIndex);
+      // Nie pomijamy uszkodzonego kroku po cichu: zmieniłoby to znaczenie
+      // udostępnionej trasy i mogłoby ukryć niebezpieczny przydział grupy.
+      if (!step || seenStepIds.has(step.id)) return null;
+      if (step.kind === "meal" && ++mealCount > 1) return null;
+      if (step.kind === "flex" && (++flexCount > 1 || stepIndex !== day.steps.length - 1)) return null;
+      seenStepIds.add(step.id);
+      const attractionIds = step.kind === "ride"
+        ? [step.attractionId]
+        : step.kind === "split"
+          ? step.assignments.map((assignment) => assignment.attractionId)
+          : [];
+      if (attractionIds.some((id) => seenAttractionIds.has(id)) || new Set(attractionIds).size !== attractionIds.length) return null;
+      attractionIds.forEach((id) => seenAttractionIds.add(id));
+      attractionCount += attractionIds.length;
+      steps.push(step);
+    }
     const coreSteps = steps.filter((step) => step.kind !== "flex");
-    return {
+    days.push({
       day: dayIndex + 1,
       label: `Dzień ${dayIndex + 1}`,
       steps,
@@ -183,14 +227,15 @@ export function sanitizeSharedPlan(input) {
         end: formatPlanTime(steps.at(-1)?.endMin ?? arrival),
         coreEnd: formatPlanTime(coreSteps.at(-1)?.endMin ?? arrival),
       },
-    };
-  });
+    });
+  }
+  if (attractionCount === 0) return null;
   const plan = {
     version: 1,
-    generatedAt: Number.isFinite(Date.parse(input.generatedAt)) ? new Date(input.generatedAt).toISOString() : new Date().toISOString(),
+    generatedAt: typeof input.generatedAt === "string" && Number.isFinite(Date.parse(input.generatedAt)) ? new Date(input.generatedAt).toISOString() : new Date().toISOString(),
     profile,
     days,
-    queueSnapshotAt: Number.isFinite(Number(input.queueSnapshotAt)) ? Number(input.queueSnapshotAt) : null,
+    queueSnapshotAt: Number.isFinite(finiteOr(input.queueSnapshotAt, NaN)) ? finiteOr(input.queueSnapshotAt, null) : null,
   };
   const safety = validatePlanSafety(plan);
   if (!safety.valid) return null;
@@ -200,7 +245,52 @@ export function sanitizeSharedPlan(input) {
 }
 
 export function encodePlan(plan) {
-  return toBase64Url(JSON.stringify(plan));
+  const sanitized = sanitizeSharedPlan(plan);
+  if (!sanitized) return "";
+
+  // Wiek i wzrost są potrzebne do ponownej weryfikacji ograniczeń atrakcji.
+  // Imiona i potencjalnie identyfikujące ID nie są — link dostaje neutralne
+  // oznaczenia, a przydziały podgrup są przepinane na nowe identyfikatory.
+  const roleCounts = { adult: 0, child: 0 };
+  const memberIdMap = new Map();
+  const members = sanitized.profile.members.map((member) => {
+    roleCounts[member.role] += 1;
+    const ordinal = roleCounts[member.role];
+    const id = `${member.role}-${ordinal}`;
+    memberIdMap.set(member.id, id);
+    return {
+      id,
+      role: member.role,
+      name: member.role === "adult" ? `Dorosły ${ordinal}` : `Dziecko ${ordinal}`,
+      age: member.age,
+      height: member.height,
+    };
+  });
+  const days = sanitized.days.map((day) => ({
+    steps: day.steps.map((step) => {
+      if (step.kind === "ride") {
+        return { ...step, memberIds: step.memberIds.map((id) => memberIdMap.get(id)) };
+      }
+      if (step.kind === "split") {
+        return {
+          ...step,
+          assignments: step.assignments.map((assignment) => ({
+            ...assignment,
+            memberIds: assignment.memberIds.map((id) => memberIdMap.get(id)),
+          })),
+        };
+      }
+      return step;
+    }),
+  }));
+  const snapshot = {
+    version: 1,
+    generatedAt: sanitized.generatedAt,
+    queueSnapshotAt: sanitized.queueSnapshotAt,
+    profile: { ...sanitized.profile, members },
+    days,
+  };
+  return toBase64Url(JSON.stringify(snapshot));
 }
 
 export function decodePlan(payload) {
@@ -219,7 +309,8 @@ export function planFromHash(hash = window.location.hash) {
 
 export function createPlanUrl(plan) {
   const url = new URL(window.location.href);
-  url.hash = `plan=${encodePlan(plan)}`;
+  const payload = encodePlan(plan);
+  url.hash = payload ? `plan=${payload}` : "";
   return url.toString();
 }
 

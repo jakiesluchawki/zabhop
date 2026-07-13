@@ -6,9 +6,25 @@ const DETAILS = Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley-9.jpg",
     summary: "Rodzinna kolejka w Sweet Valley: prawie 12 metrów wysokości, sporo zakrętów i prędkość do 46 km/h. Dobra rozgrzewka, ale u Was pozostaje żółtym dodatkiem.",
   }),
+  "bumble-boats": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley-45.jpg",
+    summary: "Spokojny rejs małą łódką przez czekoladową scenografię Sweet Valley. Dobra żółta opcja dla sześciolatków, kiedy chcecie zwolnić po szybszych kolejkach.",
+  }),
+  "mokate-twist": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley-5.jpg",
+    summary: "Duża wirująca platforma z filiżankami, które można dodatkowo obracać samodzielnie. Krótka, zabawna i wyraźnie bardziej dynamiczna niż zwykła karuzela.",
+  }),
+  "bon-bon-balloon": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley.jpg",
+    summary: "Latające balony w Sweet Valley obracają się wspólnie, a każda rodzina może dodatkowo sterować własną gondolą. Spokojniejsza żółta przerwa z dobrym widokiem.",
+  }),
   "candy-carousel": Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley-13.jpg",
     summary: "Dwupoziomowa karuzela wiedeńska w samym środku Sweet Valley. Spokojny, widokowy przystanek, gdy potrzebujecie chwili oddechu.",
+  }),
+  "crazy-barn": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley-31.jpg",
+    summary: "Obrotowa stodoła przechyla wagoniki pod różnymi kątami i kręci nimi po całej platformie. To jedna z mocniejszych żółtych opcji, znacznie ciekawsza niż zwykła karuzela.",
   }),
   "choco-chip-creek": Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2021/10/Sweet-Valley-25.jpg",
@@ -17,6 +33,10 @@ const DETAILS = Object.freeze({
   abyssus: Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2019/11/AQUALANTIS-8.jpg",
     summary: "Najmocniejszy punkt Waszej trasy: podwójnie wystrzeliwany rollercoaster, do 100 km/h, 38,5 m wysokości i pięć inwersji.",
+  }),
+  "whirlpool-water-fight": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2019/11/AQUALANTIS.jpg",
+    summary: "Interaktywna wodna bitwa w Aqualantis: łodzie mają armatki, a cała załoga pompuje i celuje. Oficjalny próg 120 cm z opiekunem czyni ją zielonym punktem planu.",
   }),
   "light-explorers": Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2020/10/AQUALANTIS-8.jpg",
@@ -42,6 +62,10 @@ const DETAILS = Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/Formula.jpg",
     summary: "Wystrzeliwany rollercoaster, który osiąga 100 km/h w około dwie sekundy i dochodzi do 4,5 G. Krótko, bardzo szybko i zdecydowanie zielony priorytet.",
   }),
+  "formula-autodrom": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/Formula-Autodrom.jpg",
+    summary: "Klasyczne samochodziki zderzakowe w rodzinnej wersji. Od 120 cm dzieci mogą naprawdę ścigać się i zderzać, więc to sensowny zielony dodatek blisko Formuły.",
+  }),
   anaconda: Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/03/STREFA-FAMILIJNA-15.jpg",
     summary: "Duża wodna przejażdżka łodzią z dwoma zjazdami, prędkością do 55 km/h i spektakularną falą. Załóżcie, że zmokniecie.",
@@ -50,9 +74,17 @@ const DETAILS = Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/RMF-Dragon.jpg",
     summary: "Podwieszany rollercoaster pędzący blisko ziemi i przez tunele. Ma około 20 m wysokości i osiąga mniej więcej 75 km/h.",
   }),
+  "viking-ride": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2017/03/STREFA-FAMILIJNA-11.jpg",
+    summary: "Spokojny rejs łodzią przez Wioskę Wikingów, pełen scenografii i małych niespodzianek. Żółty reset po mocniejszych atrakcjach w centralnej części parku.",
+  }),
   "monster-house": Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/Monster_house_2024_3-2048x1365.jpg",
     summary: "Kolejka prowadzi przez ciemny dom strachów pełen potworów i niespodzianek. Jest pod dachem, ale dla wrażliwych sześciolatków może być mocna.",
+  }),
+  "swiss-water-cups": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2017/03/Swiss_water_cups_2024_3-2048x1365.jpg",
+    summary: "Łagodny wodny rejs przez szwajcarską wioskę, elfy i ogrody. To spokojna żółta opcja oraz dobry odpoczynek bez opuszczania Strefy Familijnej.",
   }),
   atlantis: Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/Atlantis_2024_4-2048x1365.jpg",
@@ -69,6 +101,10 @@ const DETAILS = Object.freeze({
   "gold-mine": Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/Toffiffe-Kopalnia-Zlota.jpg",
     summary: "Klasyczny spływ wagonikami stylizowanymi na drewniane pnie: spokojne podjazdy przechodzą w wodne zjazdy. Przygotujcie się na zachlapanie.",
+  }),
+  "frutti-loop": Object.freeze({
+    imageUrl: "https://energylandia.pl/wp-content/uploads/2017/02/STREFA-FAMILIJNA-3.jpg",
+    summary: "Niewielki rodzinny rollercoaster z łagodnymi zjazdami i prędkością około 20 km/h. Dla Was żółta opcja na dokładkę, gdy kolejka jest krótka.",
   }),
   energus: Object.freeze({
     imageUrl: "https://energylandia.pl/wp-content/uploads/2017/03/3-2.jpg",

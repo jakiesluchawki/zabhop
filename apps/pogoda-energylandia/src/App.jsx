@@ -19,6 +19,7 @@ import { chooseRecommendation } from "./decision.js";
 import {
   formatFreshness,
   formatPolishDay,
+  loadAntistormNowcast,
   loadWeather,
   nextLocalHour,
   PARK_HOURS,
@@ -112,7 +113,7 @@ function SourceSheet({ weather, onClose }) {
         )}
 
         <p className="sheet-note">
-          ICM jest źródłem obowiązkowym. Antistorm pokazuje sytuację radarową z najbliższego dostępnego punktu — Wadowic, około 15 km od Zatora.
+          ICM pokazuje trend na cały dzień i jego przebieg może mieć kilka godzin. Alert „ruszajcie do auta” opieramy na świeżo sprawdzonym Antistorm z najbliższego punktu — Wadowic, około 15 km od Zatora. To sygnał orientacyjny, nie gwarancja pogody nad parkiem.
         </p>
       </section>
     </div>
@@ -277,6 +278,7 @@ export function App() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [nowcastRefreshing, setNowcastRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [sheet, setSheet] = useState(null);
   const [party, setParty] = useState({ standard: 1, discounted: 0 });
@@ -296,6 +298,33 @@ export function App() {
     }
   }, []);
 
+  const refreshNowcast = useCallback(async () => {
+    setNowcastRefreshing(true);
+    try {
+      const antistorm = await loadAntistormNowcast();
+      setWeather((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          antistorm,
+          sources: current.sources.map((source) => source.name === "Antistorm"
+            ? {
+              ...source,
+              status: "ok",
+              detail: `Nowcast co 15 min • ${antistorm.m} (najbliższy punkt)`,
+              updatedAt: antistorm.updatedAt,
+            }
+            : source),
+        };
+      });
+    } catch {
+      // Zachowujemy poprzedni odczyt razem z jego czasem. Logika alertu
+      // oznaczy go jako nieaktualny zamiast fałszywie pokazać „spokojnie”.
+    } finally {
+      setNowcastRefreshing(false);
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
     const interval = window.setInterval(() => refresh(true), 15 * 60 * 1000);
@@ -306,6 +335,11 @@ export function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    const interval = window.setInterval(refreshNowcast, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [refreshNowcast]);
 
   useEffect(() => {
     const onHashChange = () => setMode(window.location.hash.toLowerCase() === "#park" ? "park" : "weather");
@@ -378,7 +412,7 @@ export function App() {
   if (mode === "park") {
     return (
       <main className="mobile-prototype">
-        <ParkView weather={weather} />
+        <ParkView weather={weather} onRefreshNowcast={refreshNowcast} nowcastRefreshing={nowcastRefreshing} />
         <AppNav active="park" onChange={changeMode} />
       </main>
     );

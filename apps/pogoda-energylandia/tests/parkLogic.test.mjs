@@ -10,6 +10,7 @@ import {
   evaluateEligibility,
   findNearestToilet,
   getEligibleAttractions,
+  rankNextStops,
   walkingMinutes,
 } from "../src/parkLogic.js";
 
@@ -31,11 +32,15 @@ test("udostępnia stały profil naszej rodziny", () => {
 test("klasyfikuje atrakcje 120 cm jako zielone, a łatwiejsze jako żółte", () => {
   assert.equal(classifyAttractionForFamily(ride("choco-chip-creek")), "primary");
   assert.equal(classifyAttractionForFamily(ride("abyssus")), "primary");
+  assert.equal(classifyAttractionForFamily(ride("whirlpool-water-fight")), "primary");
   assert.equal(classifyAttractionForFamily(ride("formula")), "primary");
+  assert.equal(classifyAttractionForFamily(ride("formula-autodrom")), "primary");
   assert.equal(classifyAttractionForFamily(ride("anaconda")), "primary");
   assert.equal(classifyAttractionForFamily(ride("rmf-dragon")), "primary");
   assert.equal(classifyAttractionForFamily(ride("jungle-adventure")), "primary");
   assert.equal(classifyAttractionForFamily(ride("honey-harbour")), "secondary");
+  assert.equal(classifyAttractionForFamily(ride("crazy-barn")), "secondary");
+  assert.equal(classifyAttractionForFamily(ride("frutti-loop")), "secondary");
   assert.equal(classifyAttractionForFamily(ride("stormy-ship")), "secondary");
   assert.equal(classifyAttractionForFamily(ride("gold-mine")), "secondary");
   assert.equal(classifyAttractionForFamily(ride("candy-carousel")), "excluded");
@@ -86,7 +91,7 @@ test("żółta lista dopuszcza tylko 100/110 cm albo jawną regułę wieku", () 
   assert.equal(classifyAttractionForFamily(ride("monster-house")), "secondary");
 });
 
-test("domyślna zielona trasa zawiera dokładnie sześć hitów od 120 cm", () => {
+test("domyślna zielona trasa zawiera osiem atrakcji dostępnych od 120 cm", () => {
   const primaryIds = buildRoute()
     .filter((stop) => stop.familyTier === "primary")
     .map((stop) => stop.id);
@@ -94,11 +99,20 @@ test("domyślna zielona trasa zawiera dokładnie sześć hitów od 120 cm", () =
   assert.deepEqual(primaryIds, [
     "choco-chip-creek",
     "abyssus",
+    "whirlpool-water-fight",
     "formula",
     "anaconda",
+    "formula-autodrom",
     "rmf-dragon",
     "jungle-adventure",
   ]);
+});
+
+test("pełna prywatna lista daje szeroki wybór po zaliczeniu pierwszych atrakcji", () => {
+  const route = buildRoute();
+  assert.equal(route.filter((stop) => stop.familyTier === "primary").length, 8);
+  assert.equal(route.filter((stop) => stop.familyTier === "secondary").length, 19);
+  assert.equal(route.length, 27);
 });
 
 test("cały katalog zachowuje ścisłe znaczenie kolorów", () => {
@@ -244,6 +258,60 @@ test("następny przystanek silnie preferuje otwartą atrakcję primary", () => {
   });
   assert.equal(afterPrimaryClosure.id, "secondary-100");
   assert.equal(afterPrimaryClosure.familyTier, "secondary");
+});
+
+test("ranking pozwala deterministycznie pokazać inną bez losowania niebezpiecznej atrakcji", () => {
+  const position = ride("choco-chip-creek").location;
+  const initial = rankNextStops({ position });
+
+  assert.ok(initial.length > 2);
+  assert.equal(initial[0].familyTier, "primary");
+  assert.ok(initial.every((candidate) => candidate.familyTier !== "excluded"));
+
+  const alternate = rankNextStops({
+    position,
+    excludedIds: new Set([initial[0].id]),
+  });
+
+  assert.equal(alternate[0].id, initial[1].id);
+  assert.notEqual(alternate[0].id, initial[0].id);
+  assert.deepEqual(
+    rankNextStops({ position, skippedIds: [initial[0].id] }).map((candidate) => candidate.id),
+    alternate.map((candidate) => candidate.id),
+  );
+});
+
+test("ranking pomija atrakcje zaliczone i zamknięte", () => {
+  const position = ride("choco-chip-creek").location;
+  const initial = rankNextStops({ position });
+  const completedId = initial[0].id;
+  const closedId = initial[1].id;
+
+  const candidates = rankNextStops({
+    position,
+    completedIds: new Set([completedId]),
+    statusById: { [closedId]: "closed" },
+  });
+
+  assert.ok(candidates.length > 0);
+  assert.ok(!candidates.some((candidate) => candidate.id === completedId));
+  assert.ok(!candidates.some((candidate) => candidate.id === closedId));
+  assert.ok(candidates.every((candidate) => candidate.familyTier === "primary" || candidate.familyTier === "secondary"));
+});
+
+test("po wyczerpaniu pominięć nowa analiza może zacząć ten sam ranking od początku", () => {
+  const position = ride("choco-chip-creek").location;
+  const initial = rankNextStops({ position });
+  const exhausted = rankNextStops({
+    position,
+    excludedSuggestionIds: initial.map((candidate) => candidate.id),
+  });
+  const reset = rankNextStops({ position, excludedIds: [] });
+
+  assert.deepEqual(exhausted, []);
+  assert.deepEqual(reset.map((candidate) => candidate.id), initial.map((candidate) => candidate.id));
+  assert.equal(chooseNextStop({ position }).id, initial[0].id);
+  assert.equal(chooseNextStop({ position, excludedIds: [initial[0].id] }).id, initial[1].id);
 });
 
 test("najbliższa toaleta zwraca dystans i czas dojścia", () => {
