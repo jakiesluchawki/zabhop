@@ -25,6 +25,13 @@ function validTime(value, fallback) {
   return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value) ? value : fallback;
 }
 
+function validDateKey(value) {
+  const key = String(value || "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+  const parsed = new Date(`${key}T12:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === key ? key : null;
+}
+
 function planMinute(value) {
   const minute = finiteOr(value, NaN);
   return Number.isInteger(minute) && minute >= 0 && minute < 24 * 60 ? minute : null;
@@ -86,6 +93,18 @@ function sanitizeStep(step, dayIndex, stepIndex) {
   }
 
   if (step.kind === "flex") {
+    const hasUnplannedUntil = step.unplannedUntil !== null && step.unplannedUntil !== undefined;
+    const unplannedUntil = hasUnplannedUntil ? planMinute(step.unplannedUntil) : null;
+    if (hasUnplannedUntil && (unplannedUntil === null || unplannedUntil <= endMin)) return null;
+
+    const rawBackupIds = step.backupAttractionIds ?? [];
+    if (!Array.isArray(rawBackupIds) || rawBackupIds.length > 3) return null;
+    const backupAttractionIds = rawBackupIds.map((attractionId) => String(attractionId));
+    if (
+      new Set(backupAttractionIds).size !== backupAttractionIds.length
+      || backupAttractionIds.some((attractionId) => !ALL_ATTRACTIONS_BY_ID[attractionId])
+    ) return null;
+
     return {
       id,
       kind: "flex",
@@ -93,6 +112,8 @@ function sanitizeStep(step, dayIndex, stepIndex) {
       description: String(step.description || "").slice(0, 280),
       startMin,
       endMin,
+      unplannedUntil,
+      backupAttractionIds,
     };
   }
 
@@ -168,6 +189,7 @@ export function sanitizeSharedPlan(input) {
     : formatPlanTime(Math.round((arrival + departure) / 2));
   const profile = {
     dayCount: input.days.length,
+    visitStartDate: validDateKey(input.profile.visitStartDate),
     arrivalTime,
     departureTime,
     pace: new Set(["easy", "normal", "fast"]).has(input.profile.pace) ? input.profile.pace : "normal",
@@ -203,7 +225,16 @@ export function sanitizeSharedPlan(input) {
       // udostępnionej trasy i mogłoby ukryć niebezpieczny przydział grupy.
       if (!step || seenStepIds.has(step.id)) return null;
       if (step.kind === "meal" && ++mealCount > 1) return null;
-      if (step.kind === "flex" && (++flexCount > 1 || stepIndex !== day.steps.length - 1)) return null;
+      if (step.kind === "flex") {
+        if (++flexCount > 1 || stepIndex !== day.steps.length - 1) return null;
+        // Starsze linki powstały po sanitizacji, która usuwała informację o
+        // swobodnym odcinku dnia. Końcowy bufor zawsze oznacza horyzont do
+        // zadeklarowanego wyjścia, więc możemy go bezpiecznie odtworzyć.
+        if (step.unplannedUntil === null && step.endMin < departure) {
+          step.unplannedUntil = departure;
+        }
+        if (step.unplannedUntil !== null && step.unplannedUntil !== departure) return null;
+      }
       seenStepIds.add(step.id);
       const attractionIds = step.kind === "ride"
         ? [step.attractionId]
@@ -216,6 +247,14 @@ export function sanitizeSharedPlan(input) {
       steps.push(step);
     }
     const coreSteps = steps.filter((step) => step.kind !== "flex");
+    const finalStep = steps.at(-1);
+    const horizonEnd = finalStep?.kind === "flex"
+      ? finalStep.unplannedUntil ?? finalStep.endMin
+      : finalStep?.endMin ?? arrival;
+    // Udostępniony plan nie może po sanitizacji wyglądać na krótszy niż
+    // zadeklarowana wizyta. Nowy planer zawsze domyka ten horyzont końcowym
+    // krokiem lub buforem; niepełny payload odrzucamy zamiast go skracać.
+    if (horizonEnd !== departure) return null;
     days.push({
       day: dayIndex + 1,
       label: `Dzień ${dayIndex + 1}`,
@@ -224,8 +263,9 @@ export function sanitizeSharedPlan(input) {
         attractions: steps.reduce((total, step) => total + (step.kind === "split" ? 2 : step.kind === "ride" ? 1 : 0), 0),
         walkingMinutes: Math.round(steps.reduce((total, step) => total + finiteOr(step.walkingMinutes, 0), 0)),
         start: formatPlanTime(arrival),
-        end: formatPlanTime(steps.at(-1)?.endMin ?? arrival),
+        end: formatPlanTime(horizonEnd),
         coreEnd: formatPlanTime(coreSteps.at(-1)?.endMin ?? arrival),
+        declaredDeparture: formatPlanTime(departure),
       },
     });
   }
@@ -323,7 +363,7 @@ export function createEmailDraftUrl(email, planUrl, plan) {
       const time = formatPlanTime(step.startMin);
       if (step.kind === "ride") return `${time} — ${ALL_ATTRACTIONS_BY_ID[step.attractionId]?.name ?? "Atrakcja"} — wszyscy`;
       if (step.kind === "meal") return `${time} — ${step.title}`;
-      if (step.kind === "flex") return `${time}–${formatPlanTime(step.endMin)} — ${step.title}`;
+      if (step.kind === "flex") return `${time}–${formatPlanTime(step.unplannedUntil ?? step.endMin)} — ${step.title}`;
       if (step.kind === "split") {
         const routes = step.assignments.map((assignment) => {
           const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]?.name ?? "Atrakcja";

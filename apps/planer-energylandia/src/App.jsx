@@ -2,12 +2,14 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   AppleLogo,
   ArrowLeft,
+  ArrowClockwise,
   ArrowRight,
   ArrowsSplit,
   CalendarBlank,
   CaretRight,
   CheckCircle,
   Clock,
+  CloudRain,
   Copy,
   Crosshair,
   EnvelopeSimple,
@@ -55,6 +57,9 @@ import {
   normalizeDraftProfile,
   queueFreshness,
 } from "./appUtils.js";
+import { loadAntistormNowcast, loadWeather, formatPolishDay } from "./weather.js";
+import { assessThreeDayWeather } from "./weatherPlan.js";
+import { RainSafetyCard, WeatherStart } from "./WeatherStart.jsx";
 
 const DRAFT_KEY = "energylandia-planner-v1:draft";
 const PLAN_KEY = "energylandia-planner-v1:plan";
@@ -73,6 +78,7 @@ const STEP_ILLUSTRATIONS = [
 
 const DEFAULT_PROFILE = Object.freeze({
   dayCount: 1,
+  visitStartDate: null,
   arrivalTime: "10:00",
   departureTime: "20:00",
   pace: "normal",
@@ -129,6 +135,36 @@ function resizeMembers(members, role, requestedCount) {
 
 function memberLabel(member) {
   return member?.name?.trim() || (member?.role === "adult" ? "Dorosły" : "Dziecko");
+}
+
+function offsetDateKey(dateKey, offset) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey || ""))) return null;
+  const date = new Date(`${dateKey}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + offset);
+  return date.toISOString().slice(0, 10);
+}
+
+function planDayDateLabel(plan, dayIndex, short = true) {
+  const dateKey = offsetDateKey(plan?.profile?.visitStartDate, dayIndex);
+  return dateKey ? formatPolishDay(dateKey, short) : null;
+}
+
+function warsawDateKey(value = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Warsaw",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const byType = Object.fromEntries(parts.map(({ type, value: partValue }) => [type, partValue]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+function completedNamespaceFor(plan) {
+  const generated = new Date(plan?.generatedAt || Date.now());
+  const day = plan?.profile?.visitStartDate || warsawDateKey(Number.isFinite(generated.getTime()) ? generated : new Date());
+  const party = (plan?.profile?.members || []).map((member) => `${member.role}-${member.age}-${member.height}`).join("_");
+  return `${COMPLETED_KEY}:${day}:${party}`.slice(0, 240);
 }
 
 function safeSanitizePlan(value) {
@@ -252,7 +288,51 @@ function WizardIllustration({ step }) {
   );
 }
 
-function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatus, queueUpdatedAt, onRefreshQueues, generationError }) {
+function Welcome({ onStart, onBack, onResume }) {
+  const headingRef = useRef(null);
+
+  useLayoutEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  return (
+    <main className="welcome-shell screen-app">
+      <article className="welcome-material">
+        <header>
+          <strong>PLAN DLA WAS</strong>
+          <button className="welcome-weather-link" type="button" onClick={onBack}><ArrowLeft size={15} weight="bold" /> Wróć do pogody</button>
+        </header>
+        <section>
+          <p className="eyebrow">NIE KOLEJNY KATALOG ATRAKCJI</p>
+          <h1 ref={headingRef} tabIndex="-1">Ułóżmy wam <i>dobry dzień.</i></h1>
+          <p>Plan dopasowany do składu, wzrostu, wieku, kolejek i tego, na co naprawdę macie ochotę.</p>
+          <figure className="welcome-illustration">
+            <img
+              src={`${import.meta.env.BASE_URL}assets/welcome-plan-v1.jpg`}
+              alt="Filcowa mapa jednej przemyślanej trasy łączącej grupę, wzrost, bezpieczny podział, obiad, pogodę i metę"
+              width="1000"
+              height="666"
+              loading="eager"
+              decoding="async"
+            />
+          </figure>
+          <ul className="welcome-benefits" aria-label="Co bierze pod uwagę plan">
+            <li><Ruler size={24} weight="duotone" aria-hidden="true" /><span><strong>Ograniczenia każdej osoby</strong><small>Wiek i wzrost sprawdzamy osobno dla wszystkich.</small></span></li>
+            <li><ArrowsSplit size={24} weight="duotone" aria-hidden="true" /><span><strong>Bezpieczne podziały grupy</strong><small>Tylko za zgodą i zawsze z uprawnionym dorosłym.</small></span></li>
+            <li><ForkKnife size={24} weight="duotone" aria-hidden="true" /><span><strong>Obiad we właściwym miejscu</strong><small>Wpisany w trasę, zamiast przypadkowej przerwy po drodze.</small></span></li>
+          </ul>
+        </section>
+        <footer>
+          <button className="primary-button" type="button" onClick={onStart}>Zaczynamy <ArrowRight size={22} weight="bold" /></button>
+          {onResume && <button className="resume-button" type="button" onClick={onResume}>Wróć do zapisanego planu</button>}
+          <small>Bez konta. Odpowiedzi i lokalizacja zostają w tej przeglądarce.</small>
+        </footer>
+      </article>
+    </main>
+  );
+}
+
+function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatus, queueUpdatedAt, onRefreshQueues, generationError, weatherAssessment }) {
   const headingRef = useRef(null);
   const adults = countByRole(profile.members, "adult");
   const children = countByRole(profile.members, "child");
@@ -323,6 +403,17 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
             <h1 ref={headingRef} tabIndex="-1">Na ile dni przyjeżdżacie?</h1>
             <p className="step-lead">Rozłożymy strefy tak, żeby nie robić trzy razy tej samej pętli.</p>
             <WizardIllustration step={step} />
+            {weatherAssessment?.visit?.dayCount && (
+              <button className="weather-onboarding-suggestion" type="button" onClick={() => setProfile((current) => ({
+                ...current,
+                dayCount: weatherAssessment.visit.dayCount,
+                visitStartDate: weatherAssessment.visit.selectedDateKeys?.[0] || current.visitStartDate,
+              }))}>
+                <CloudRain size={22} weight="duotone" />
+                <span><small>POGODAPARK PODPOWIADA</small><strong>{weatherAssessment.visit.dayCount} {weatherAssessment.visit.dayCount === 1 ? "dzień" : "dni"} od {weatherAssessment.visit.selectedDateKeys?.[0] ? formatPolishDay(weatherAssessment.visit.selectedDateKeys[0], true) : "najlepszego dnia"}</strong></span>
+                <CaretRight size={18} />
+              </button>
+            )}
             <div className="day-choice-grid">
               {[1, 2, 3].map((days) => (
                 <button key={days} className={profile.dayCount === days ? "selected" : ""} type="button" aria-pressed={profile.dayCount === days} onClick={() => setProfile((current) => ({ ...current, dayCount: days }))}>
@@ -331,6 +422,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
                 </button>
               ))}
             </div>
+            <label className="single-date-field"><span>Od którego dnia</span><input type="date" value={profile.visitStartDate || ""} min={weatherAssessment?.days?.[0]?.dateKey || undefined} onChange={(event) => setProfile((current) => ({ ...current, visitStartDate: event.target.value || null }))} /></label>
             <div className="time-grid">
               <label><span>Wchodzicie około</span><input type="time" value={profile.arrivalTime} onChange={(event) => setProfile((current) => ({ ...current, arrivalTime: event.target.value }))} /></label>
               <label><span>Kończycie około</span><input type="time" value={profile.departureTime} onChange={(event) => setProfile((current) => ({ ...current, departureTime: event.target.value }))} /></label>
@@ -445,7 +537,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
             <p className="step-lead">Plan najpierw pilnuje ograniczeń, później wspólnej zabawy, kolejek i marszu.</p>
             <WizardIllustration step={step} />
             <div className="review-card">
-              <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.dayCount} {profile.dayCount === 1 ? "dzień" : "dni"}</strong><small>{profile.arrivalTime}–{profile.departureTime} · tempo {profile.pace === "easy" ? "spokojne" : profile.pace === "fast" ? "szybkie" : "normalne"}</small></span></div>
+              <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.dayCount} {profile.dayCount === 1 ? "dzień" : "dni"}{profile.visitStartDate ? ` od ${formatPolishDay(profile.visitStartDate, true)}` : ""}</strong><small>{profile.arrivalTime}–{profile.departureTime} · tempo {profile.pace === "easy" ? "spokojne" : profile.pace === "fast" ? "szybkie" : "normalne"}</small></span></div>
               <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)} ${member.height} cm`).join(" · ")}</small></span></div>
               <div><Sparkle size={22} weight="duotone" /><span><strong>{profile.preferences.intensity === "thrill" ? "Mocny dzień" : profile.preferences.intensity === "calm" ? "Spokojny dzień" : "Po trochu"}</strong><small>kolejki do {profile.preferences.maxQueue} min · woda: {profile.preferences.wet === "avoid" ? "nie" : profile.preferences.wet === "want" ? "tak" : "może być"}</small></span></div>
               <div><ArrowsSplit size={22} weight="duotone" /><span><strong>{effectiveSplitPolicy === "never" ? "Zawsze razem" : effectiveSplitPolicy === "often" ? "Podział dozwolony" : "Jeden wartościowy podział"}</strong><small>{profile.meal.mode === "none" ? "bez zaplanowanego obiadu" : `obiad około ${profile.meal.time}`}</small></span></div>
@@ -569,11 +661,12 @@ function PrintablePlan({ plan, planUrl }) {
     <article className="print-plan">
       <header><p>PLAN DLA WAS • ENERGYLANDIA</p><h1>{plan.days.length} {plan.days.length === 1 ? "dzień" : "dni"} bez biegania w kółko</h1><span>Wygenerowano {new Date(plan.generatedAt).toLocaleString("pl-PL")}</span></header>
       <section className="print-party"><h2>Skład</h2><p>{plan.profile.members.map((member) => `${memberLabel(member)} — ${member.age} lat, ${member.height} cm`).join(" • ")}</p></section>
-      {plan.days.map((rawDay) => {
+      {plan.days.map((rawDay, dayIndex) => {
         const day = annotatedDay(rawDay);
-        return <section className="print-day" key={day.day}><h2>{day.label} <small>{day.stats.start}–{day.stats.end}</small></h2>{day.steps.map((step) => {
+        const dateLabel = planDayDateLabel(plan, dayIndex, false);
+        return <section className="print-day" key={day.day}><h2>{day.label}{dateLabel ? ` · ${dateLabel}` : ""} <small>{day.stats.start}–{day.stats.end}</small></h2>{day.steps.map((step) => {
           if (step.kind === "meal") return <div className="print-step meal" key={step.id}><strong>{formatPlanTime(step.startMin)} · OBIAD</strong><span>{step.title}</span><small>{step.description}</small></div>;
-          if (step.kind === "flex") return <div className="print-step flex" key={step.id}><strong>{formatPlanTime(step.startMin)}–{formatPlanTime(step.endMin)} · BUFOR</strong><span>{step.title}</span><small>{step.description}</small></div>;
+          if (step.kind === "flex") return <div className="print-step flex" key={step.id}><strong>{formatPlanTime(step.startMin)}–{formatPlanTime(step.unplannedUntil ?? step.endMin)} · BUFOR</strong><span>{step.title}</span><small>{step.description}</small></div>;
           if (step.kind === "ride") { const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId]; return <div className="print-step" key={step.id}><strong>{formatPlanTime(step.startMin)} · {step.sequence}</strong><span>{ride.name}</span><small>{zoneLabel(ride.zone)} · {attractionLabel(ride)} · wszyscy</small></div>; }
           return <div className="print-step split" key={step.id}><strong>{formatPlanTime(step.startMin)} · {step.sequence} · PODZIAŁ</strong>{step.assignments.map((assignment) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; return <span key={assignment.attractionId}>{assignment.label}: <b>{ride.name}</b> — {assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</span>; })}<small>Spotkanie {step.reunion.time}: {step.reunion.label}</small></div>;
         })}</section>;
@@ -583,18 +676,20 @@ function PrintablePlan({ plan, planUrl }) {
   );
 }
 
-function PlanView({ plan, onEdit }) {
+function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus, onRefreshWeather }) {
+  const planHeadingRef = useRef(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [showToilets, setShowToilets] = useState(false);
   const { position, status: locationStatus, locate } = useUserLocation();
-  const completedKey = useMemo(() => `${COMPLETED_KEY}:${String(plan.generatedAt || "plan").slice(0, 40)}`, [plan.generatedAt]);
+  const completedKey = useMemo(() => completedNamespaceFor(plan), [plan]);
   const [completedIds, setCompletedIds] = useState(() => {
     const stored = readStored(completedKey, []);
     return Array.isArray(stored) ? [...new Set(stored.filter((id) => ALL_ATTRACTIONS_BY_ID[id]))] : [];
   });
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState("");
+  const [reanalyzing, setReanalyzing] = useState(false);
   const shareUrlRef = useRef(null);
   const day = annotatedDay(plan.days[selectedDay] ?? plan.days[0] ?? { steps: [], stats: {} });
   const mapItems = planMapItems(day);
@@ -617,6 +712,9 @@ function PlanView({ plan, onEdit }) {
     return [];
   })[0] ?? { memberIds: plan.profile.members.map((member) => member.id), sequence: selectedMapItem?.sequence ?? "" };
 
+  useLayoutEffect(() => {
+    planHeadingRef.current?.focus({ preventScroll: true });
+  }, []);
   useEffect(() => writeStored(completedKey, completedIds), [completedIds, completedKey]);
   useEffect(() => { if (notice) { const timeout = window.setTimeout(() => setNotice(""), 2400); return () => window.clearTimeout(timeout); } return undefined; }, [notice]);
   useEffect(() => setSelectedId(null), [selectedDay]);
@@ -628,10 +726,20 @@ function PlanView({ plan, onEdit }) {
     setNotice(wasCompleted ? `Przywrócono: ${attraction?.name ?? "atrakcja"}` : `Zaliczone: ${attraction?.name ?? "atrakcja"}`);
   };
   const closeDetail = useCallback(() => setSelectedId(null), []);
+  const handleReanalyze = async () => {
+    if (reanalyzing) return;
+    setReanalyzing(true);
+    try {
+      await onReanalyze();
+      setNotice("Plan przeliczony na świeżych kolejkach");
+    } finally {
+      setReanalyzing(false);
+    }
+  };
   const share = async () => {
     try {
       if (navigator.share) {
-        await navigator.share({ title: "Nasz plan Energylandii", text: "Spersonalizowana trasa dla naszej grupy", url: planUrl });
+        await navigator.share({ url: planUrl });
         return;
       }
       await navigator.clipboard.writeText(planUrl);
@@ -656,8 +764,9 @@ function PlanView({ plan, onEdit }) {
   return (
     <>
       <main className="plan-shell screen-app">
-        <header className="plan-topbar"><div><p className="eyebrow">PLAN DLA WAS</p><h1>Wasza Energylandia</h1></div><button type="button" onClick={onEdit}><PencilSimple size={17} /> Zmień</button></header>
+        <header className="plan-topbar"><div><p className="eyebrow">PLAN DLA WAS</p><h1 ref={planHeadingRef} tabIndex="-1">Wasza Energylandia</h1></div><div className="plan-topbar-actions"><button type="button" onClick={handleReanalyze} disabled={reanalyzing}><ArrowClockwise className={reanalyzing ? "spin" : ""} size={17} /> {reanalyzing ? "Liczę…" : "Przelicz"}</button><button type="button" onClick={onEdit}><PencilSimple size={17} /> Zmień</button></div></header>
         {!plan.safety?.valid && <div className="safety-alert"><WarningCircle size={22} weight="fill" /><span><strong>Plan wymaga poprawy</strong><small>{plan.safety?.issues?.[0]}</small></span></div>}
+        <RainSafetyCard assessment={weatherAssessment} status={weatherStatus} onRefresh={onRefreshWeather} />
         <section className="plan-hero" aria-live="polite">
           <p>DZIEŃ {day.day ?? selectedDay + 1} Z {plan.days.length} • {plan.profile.members.length} OSÓB</p>
           <h2>{firstRide ? <>{completedToday > 0 ? "Teraz czas na" : "Zacznijcie od"}<br /><em>{firstRide.name}</em></> : `Dzień ${day.day ?? selectedDay + 1} zaliczony`}</h2>
@@ -665,7 +774,7 @@ function PlanView({ plan, onEdit }) {
           {firstRideDistance && <small className="hero-distance"><Footprints size={16} weight="duotone" /> {firstRideDistance}</small>}
           {firstRide && <button className="hero-next-button" type="button" aria-haspopup="dialog" onClick={() => setSelectedId(firstRide.id)}>Opis i prowadzenie <CaretRight size={18} /></button>}
         </section>
-        <nav className="day-tabs" aria-label="Dni planu">{plan.days.map((item, index) => <button key={item.day} type="button" className={selectedDay === index ? "selected" : ""} aria-pressed={selectedDay === index} aria-current={selectedDay === index ? "step" : undefined} onClick={() => { setSelectedDay(index); setNotice(`Pokazuję dzień ${item.day}`); }}>Dzień {item.day}<small>{item.stats.attractions} atrakcji</small></button>)}</nav>
+        <nav className="day-tabs" aria-label="Dni planu">{plan.days.map((item, index) => { const dateLabel = planDayDateLabel(plan, index, true); return <button key={item.day} type="button" className={selectedDay === index ? "selected" : ""} aria-pressed={selectedDay === index} aria-current={selectedDay === index ? "step" : undefined} onClick={() => { setSelectedDay(index); setNotice(`Pokazuję dzień ${item.day}`); }}>Dzień {item.day}<small>{dateLabel ? `${dateLabel} · ` : ""}{item.stats.attractions} atrakcji</small></button>; })}</nav>
 
         <section className="plan-map-card" aria-labelledby="map-title">
           <div className="section-heading"><div><p className="eyebrow">TRASA NA DZISIAJ</p><h2 id="map-title">Mapa dnia</h2></div><div className="map-controls"><button type="button" className={`location-control ${locationStatus === "ready" ? "active" : ""}`} onClick={locate}><Crosshair size={18} weight="bold" /> {locationStatus === "loading" ? "Szukam…" : locationStatus === "ready" ? "GPS" : "Odległości"}</button><button type="button" className={showToilets ? "active" : ""} aria-pressed={showToilets} onClick={() => setShowToilets((value) => !value)}><Toilet size={18} weight="fill" /> WC</button></div></div>
@@ -681,7 +790,7 @@ function PlanView({ plan, onEdit }) {
           <div className="timeline">
             {day.steps.map((step) => {
               if (step.kind === "meal") return <article className="timeline-meal" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="meal-icon"><ForkKnife size={20} weight="fill" /></div><div><em>PRZERWA</em><h3>{step.title}</h3><p>{step.description}</p></div></article>;
-              if (step.kind === "flex") return <article className="timeline-flex" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="flex-icon"><Sparkle size={19} weight="fill" /></div><div><em>ELASTYCZNIE DO {formatPlanTime(step.endMin)}</em><h3>{step.title}</h3><p>{step.description}</p></div></article>;
+              if (step.kind === "flex") return <article className="timeline-flex" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="flex-icon"><Sparkle size={19} weight="fill" /></div><div><em>ELASTYCZNIE DO {formatPlanTime(step.unplannedUntil ?? step.endMin)}</em><h3>{step.title}</h3><p>{step.description}</p></div></article>;
               if (step.kind === "ride") {
                 const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId];
                 const completed = completedIds.includes(ride.id);
@@ -714,41 +823,100 @@ export function App() {
     try { return planFromHash(); } catch { return null; }
   }, []);
   const storedPlan = useMemo(() => safeSanitizePlan(readStored(PLAN_KEY, null)), []);
-  const [screen, setScreen] = useState(sharedPlan ? "plan" : "welcome");
+  const [screen, setScreen] = useState(sharedPlan ? "plan" : "weather");
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState(() => normalizeDraftProfile(readStored(DRAFT_KEY, DEFAULT_PROFILE), DEFAULT_PROFILE));
   const [plan, setPlan] = useState(sharedPlan);
   const [queues, setQueues] = useState(null);
   const [queueStatus, setQueueStatus] = useState("loading");
   const [generationError, setGenerationError] = useState("");
+  const [weather, setWeather] = useState(null);
+  const [weatherStatus, setWeatherStatus] = useState("loading");
+  const [weatherClock, setWeatherClock] = useState(() => Date.now());
   const queuesRef = useRef(null);
+  const weatherRef = useRef(null);
 
   useEffect(() => writeStored(DRAFT_KEY, profile), [profile]);
-  const refreshQueues = useCallback(async () => {
-    const controller = new AbortController();
+  const refreshQueues = useCallback(async (signal) => {
     setQueueStatus("loading");
     try {
-      const data = await loadQueueTimes(controller.signal);
+      const data = await loadQueueTimes(signal);
       queuesRef.current = data;
       setQueues(data);
       setQueueStatus("ready");
+      return data;
     } catch (error) {
       if (error.name !== "AbortError") setQueueStatus(queuesRef.current ? "stale" : "error");
+      return null;
     }
-    return controller;
   }, []);
   useEffect(() => {
-    let controller;
-    refreshQueues().then((value) => { controller = value; });
-    return () => controller?.abort();
+    const controller = new AbortController();
+    refreshQueues(controller.signal);
+    return () => controller.abort();
   }, [refreshQueues]);
 
-  const queueById = useMemo(() => Object.fromEntries(Object.values(ALL_ATTRACTIONS_BY_ID).map((attraction) => [attraction.id, queueForAttraction(attraction, queues)])), [queues]);
+  const refreshWeather = useCallback(async () => {
+    setWeatherStatus(weatherRef.current ? "refreshing" : "loading");
+    try {
+      const nextWeather = await loadWeather();
+      weatherRef.current = nextWeather;
+      setWeather(nextWeather);
+      setWeatherClock(Date.now());
+      setWeatherStatus("ready");
+      return nextWeather;
+    } catch {
+      setWeatherStatus(weatherRef.current ? "stale" : "error");
+      return null;
+    }
+  }, []);
+
+  const refreshAntistorm = useCallback(async () => {
+    if (!weatherRef.current) return null;
+    try {
+      const antistorm = await loadAntistormNowcast();
+      const nextWeather = {
+        ...weatherRef.current,
+        antistorm,
+        sources: (weatherRef.current.sources || []).map((source) => source.name === "Antistorm" ? {
+          ...source,
+          status: "ok",
+          detail: `Nowcast co 15 min • ${antistorm.m || "najbliższy punkt"}`,
+          updatedAt: antistorm.updatedAt,
+        } : source),
+      };
+      weatherRef.current = nextWeather;
+      setWeather(nextWeather);
+      setWeatherClock(Date.now());
+      return antistorm;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshWeather();
+    const fullForecastInterval = window.setInterval(refreshWeather, 15 * 60_000);
+    const nowcastInterval = window.setInterval(refreshAntistorm, 5 * 60_000);
+    const clockInterval = window.setInterval(() => setWeatherClock(Date.now()), 60_000);
+    return () => {
+      window.clearInterval(fullForecastInterval);
+      window.clearInterval(nowcastInterval);
+      window.clearInterval(clockInterval);
+    };
+  }, [refreshAntistorm, refreshWeather]);
+
+  const weatherAssessment = useMemo(() => weather ? assessThreeDayWeather(weather, { now: new Date(weatherClock), carWalkMinutes: 30 }) : null, [weather, weatherClock]);
+  const queueMapFor = useCallback((queueData) => Object.fromEntries(Object.values(ALL_ATTRACTIONS_BY_ID).map((attraction) => [attraction.id, queueForAttraction(attraction, queueData)])), []);
+  const buildPlanForProfile = useCallback((profileInput, queueData) => {
+    const normalizedProfile = normalizeDraftProfile(profileInput, DEFAULT_PROFILE);
+    const safeProfile = normalizedProfile.members.filter(isGuardian).length < 2 ? { ...normalizedProfile, splitPolicy: "never" } : normalizedProfile;
+    return buildUniversalPlan({ ...safeProfile, queueSnapshotAt: queueData?.updatedAt ?? null }, { queueById: queueMapFor(queueData) });
+  }, [queueMapFor]);
+
   const generate = useCallback(() => {
     setGenerationError("");
-    const normalizedProfile = normalizeDraftProfile(profile, DEFAULT_PROFILE);
-    const safeProfile = normalizedProfile.members.filter(isGuardian).length < 2 ? { ...normalizedProfile, splitPolicy: "never" } : normalizedProfile;
-    const nextPlan = buildUniversalPlan({ ...safeProfile, queueSnapshotAt: queues?.updatedAt ?? null }, { queueById });
+    const nextPlan = buildPlanForProfile(profile, queues);
     if (countPlanAttractions(nextPlan) === 0) {
       setGenerationError("Podnieś limit kolejki, poluzuj tryb „spokojnie” lub sprawdź wzrost i wiek uczestników. Nie udostępnimy pustego linku udającego plan.");
       setStep(STEP_LABELS.length - 1);
@@ -761,13 +929,41 @@ export function App() {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     setScreen("plan");
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, [profile, queueById, queues]);
+  }, [buildPlanForProfile, profile, queues]);
 
-  if (screen === "welcome") {
-    return <main className="welcome-shell screen-app"><div className="welcome-material"><header><span>PLAN DLA WAS</span><em>ENERGYLANDIA • BETA</em></header><section><p className="eyebrow">NIE KOLEJNY KATALOG ATRAKCJI</p><h1>Ułóżmy wam<br /><i>dobry dzień.</i></h1><p>Plan dopasowany do składu, wzrostu, wieku, kolejek i tego, na co naprawdę macie ochotę.</p>{sharedHashPresent && !sharedPlan && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>Ten link do planu jest uszkodzony albo pochodzi ze starszej wersji. Możesz ułożyć nową trasę poniżej.</span></div>}<div className="welcome-benefits"><span><Ruler size={18} /> ograniczenia każdej osoby</span><span><ArrowsSplit size={18} /> bezpieczne podziały grupy</span><span><ForkKnife size={18} /> obiad we właściwym miejscu</span></div></section><footer><button className="primary-button" type="button" onClick={() => { setGenerationError(""); setStep(0); setScreen("onboarding"); }}>Zaczynamy <ArrowRight size={20} weight="bold" /></button>{storedPlan && <button className="resume-button" type="button" onClick={() => { setPlan(storedPlan); setScreen("plan"); }}>Wróć do zapisanego planu</button>}<small>Bez konta. Odpowiedzi i lokalizacja zostają w tej przeglądarce. Link bez imion i lokalizacji nadal zawiera wiek oraz wzrost potrzebne do ułożenia bezpiecznej trasy.</small></footer></div><div className="welcome-orbit" aria-hidden="true"><span>1</span><span>2</span><span>3</span></div></main>;
+  const prepareFreshPlan = ({ dayCount = 1, startDate = null } = {}) => {
+    const freshProfile = normalizeDraftProfile({ ...DEFAULT_PROFILE, dayCount, visitStartDate: startDate }, DEFAULT_PROFILE);
+    setGenerationError("");
+    setProfile(freshProfile);
+    setStep(0);
+    setScreen("welcome");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  };
+
+  const beginOnboarding = () => {
+    setStep(0);
+    setScreen("onboarding");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  };
+
+  const reanalyze = async () => {
+    if (!plan) return;
+    const latestQueues = await refreshQueues();
+    const nextPlan = buildPlanForProfile(plan.profile, latestQueues || queues);
+    if (countPlanAttractions(nextPlan) === 0) return;
+    setPlan(nextPlan);
+    writeStored(PLAN_KEY, nextPlan);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  };
+
+  if (screen === "weather") {
+    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} damagedLink={sharedHashPresent && !sharedPlan} onContinue={prepareFreshPlan} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
   }
 
-  if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={refreshQueues} generationError={generationError} />;
+  if (screen === "welcome") return <Welcome onStart={beginOnboarding} onBack={() => setScreen("weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
+
+  if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={() => refreshQueues()} generationError={generationError} weatherAssessment={weatherAssessment} />;
   if (!plan) return null;
-  return <PlanView plan={plan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
+  return <PlanView plan={plan} onReanalyze={reanalyze} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
 }

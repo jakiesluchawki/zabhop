@@ -11,6 +11,7 @@ import {
 
 const fallback = {
   dayCount: 1,
+  visitStartDate: null,
   arrivalTime: "10:00",
   departureTime: "20:00",
   pace: "normal",
@@ -34,6 +35,11 @@ test("stary lub częściowo uszkodzony szkic jest bezpiecznie normalizowany", ()
   assert.equal(new Set(profile.members.map((member) => member.id)).size, profile.members.length);
   assert.deepEqual(profile.preferences.interests, ["family"]);
   assert.equal(profile.preferences.maxQueue, 90);
+  assert.equal(profile.visitStartDate, null);
+
+  const dated = normalizeDraftProfile({ ...fallback, visitStartDate: "2026-07-14" }, fallback);
+  assert.equal(dated.visitStartDate, "2026-07-14");
+  assert.equal(normalizeDraftProfile({ ...fallback, visitStartDate: "jutro" }, fallback).visitStartDate, null);
 
   const crowded = normalizeDraftProfile({
     members: Array.from({ length: 14 }, (_, index) => ({ id: `c-${index}`, role: "child", age: 6, height: 120 })),
