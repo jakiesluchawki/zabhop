@@ -1,7 +1,7 @@
 // Curated family route for children around six years old. Ride restrictions
 // come from the linked official Energylandia pages. Coordinates are entrances
-// or useful ride centroids from the local OpenStreetMap extract
-// (tmp/energylandia.osm, ODbL).
+// or useful ride centroids from OpenStreetMap. A few new rides that are not
+// mapped in OSM yet use calibrated points from Energylandia's official map.
 
 export const ZONES = Object.freeze({
   "sweet-valley": Object.freeze({ id: "sweet-valley", name: "Sweet Valley", routeOrder: 0 }),
@@ -24,6 +24,7 @@ export const DEFAULT_ZONE_ORDER = Object.freeze([
 export const RULES_SOURCE_URL =
   "https://energylandia.pl/wp-content/uploads/2024/06/MAPKA_PL_2026.pdf";
 export const OSM_SOURCE_URL = "https://www.openstreetmap.org/copyright";
+export const OFFICIAL_MAP_URL = "https://energylandia.pl/mapa-parku/";
 
 const official = (path) => `https://energylandia.pl/atrakcje/${path}/`;
 
@@ -31,6 +32,7 @@ function attraction({
   restrictions,
   queueAliases = [],
   defaultStatus = "open",
+  coordinateSourceUrl = OSM_SOURCE_URL,
   ...details
 }) {
   const normalizedRestrictions = Object.freeze({
@@ -54,7 +56,7 @@ function attraction({
     ...normalizedRestrictions,
     sources: Object.freeze({
       restrictions: details.sourceUrl,
-      coordinates: OSM_SOURCE_URL,
+      coordinates: coordinateSourceUrl,
     }),
   });
 }
@@ -76,6 +78,54 @@ export const ATTRACTIONS = Object.freeze([
     sourceUrl: official("sweet-valley/honey-harbour"),
   }),
   attraction({
+    id: "bumble-boats",
+    name: "Bumble Boats",
+    osmId: "node/13049474741",
+    officialNumber: 223,
+    zone: "sweet-valley",
+    location: Object.freeze({ lat: 49.9988743, lon: 19.4024794 }),
+    restrictions: { minAgeWithGuardian: 4, maxAgeWithGuardian: 12, soloHeight: 120 },
+    routeOrder: 12,
+    priority: 71,
+    intensity: "calm",
+    wet: true,
+    durationMinutes: 5,
+    queueAliases: ["Bumble Boats 223"],
+    sourceUrl: official("sweet-valley/bumble-boats"),
+  }),
+  attraction({
+    id: "mokate-twist",
+    name: "Mokate Twist",
+    osmId: "node/13055187669",
+    officialNumber: 216,
+    zone: "sweet-valley",
+    location: Object.freeze({ lat: 49.9996628, lon: 19.4022176 }),
+    restrictions: { minAgeWithGuardian: 2, maxAgeWithGuardian: 13, soloHeight: 120 },
+    routeOrder: 16,
+    priority: 67,
+    intensity: "medium",
+    wet: false,
+    durationMinutes: 4,
+    queueAliases: ["Mokate Twist 216"],
+    sourceUrl: official("sweet-valley/mokate-twist"),
+  }),
+  attraction({
+    id: "bon-bon-balloon",
+    name: "Bon Bon Balloon",
+    osmId: "node/13055187663",
+    officialNumber: 218,
+    zone: "sweet-valley",
+    location: Object.freeze({ lat: 50.0001126, lon: 19.403579 }),
+    restrictions: { minAgeWithGuardian: 2, maxAgeWithGuardian: 13, soloHeight: 120 },
+    routeOrder: 18,
+    priority: 65,
+    intensity: "calm",
+    wet: false,
+    durationMinutes: 4,
+    queueAliases: ["Bon Bon Balloon 218"],
+    sourceUrl: official("sweet-valley/bon-bon-balloon"),
+  }),
+  attraction({
     id: "candy-carousel",
     name: "Candy Carousel",
     osmId: "node/13049474744",
@@ -91,6 +141,22 @@ export const ATTRACTIONS = Object.freeze([
     durationMinutes: 4,
     queueAliases: ["Candy Carousel 217"],
     sourceUrl: official("sweet-valley/candy-carousel"),
+  }),
+  attraction({
+    id: "crazy-barn",
+    name: "Crazy Barn",
+    officialNumber: 221,
+    zone: "sweet-valley",
+    location: Object.freeze({ lat: 49.9992966, lon: 19.4021595 }),
+    coordinateSourceUrl: `${OFFICIAL_MAP_URL}?location=221`,
+    restrictions: { minHeightWithGuardian: 100, soloHeight: 120 },
+    routeOrder: 25,
+    priority: 96,
+    intensity: "medium",
+    wet: false,
+    durationMinutes: 4,
+    queueAliases: ["Crazy Barn 221"],
+    sourceUrl: official("sweet-valley/crazy-barn"),
   }),
   attraction({
     id: "choco-chip-creek",
@@ -121,6 +187,22 @@ export const ATTRACTIONS = Object.freeze([
     durationMinutes: 4,
     queueAliases: ["Abyssus"],
     sourceUrl: official("aqualantis/abyssus"),
+  }),
+  attraction({
+    id: "whirlpool-water-fight",
+    name: "Whirlpool Water Fight",
+    officialNumber: 186,
+    zone: "aqualantis",
+    location: Object.freeze({ lat: 49.9993693, lon: 19.399734 }),
+    coordinateSourceUrl: `${OFFICIAL_MAP_URL}?location=186`,
+    restrictions: { minHeightWithGuardian: 120, soloHeight: 140 },
+    routeOrder: 37,
+    priority: 91,
+    intensity: "medium",
+    wet: true,
+    durationMinutes: 5,
+    queueAliases: ["Whirpool Water Fight", "Whirlpool Water Fight 186"],
+    sourceUrl: official("aqualantis/whiripool-water-figh"),
   }),
   attraction({
     id: "light-explorers",
@@ -216,6 +298,22 @@ export const ATTRACTIONS = Object.freeze([
     sourceUrl: official("strefa-ekstremalna/formula-roller-coaster"),
   }),
   attraction({
+    id: "formula-autodrom",
+    name: "Formuła Autodrom",
+    osmId: "way/666524711",
+    officialNumber: 35,
+    zone: "family-zone",
+    location: Object.freeze({ lat: 49.9999185, lon: 19.4050172 }),
+    restrictions: { minHeightWithGuardian: 120, soloHeight: 120 },
+    routeOrder: 87,
+    priority: 82,
+    intensity: "medium",
+    wet: false,
+    durationMinutes: 4,
+    queueAliases: ["Formula Autodrom", "Formuła Autodrom 35"],
+    sourceUrl: official("strefa-familijna/formula-autodrom"),
+  }),
+  attraction({
     id: "anaconda",
     name: "Anaconda",
     osmId: "way/666524712",
@@ -246,6 +344,22 @@ export const ATTRACTIONS = Object.freeze([
     sourceUrl: official("strefa-familijna/rmf-dragon-roller-coaster"),
   }),
   attraction({
+    id: "viking-ride",
+    name: "Viking Ride",
+    osmId: "way/794273137",
+    officialNumber: 95,
+    zone: "family-zone",
+    location: Object.freeze({ lat: 49.9991074, lon: 19.4065597 }),
+    restrictions: { minAgeWithGuardian: 2, maxAgeWithGuardian: 13, soloHeight: 120 },
+    routeOrder: 93,
+    priority: 69,
+    intensity: "calm",
+    wet: true,
+    durationMinutes: 7,
+    queueAliases: ["Viking Ride 95"],
+    sourceUrl: official("strefa-familijna/viking-ride"),
+  }),
+  attraction({
     id: "monster-house",
     name: "Monster House",
     osmId: "way/371626338",
@@ -260,6 +374,22 @@ export const ATTRACTIONS = Object.freeze([
     durationMinutes: 6,
     queueAliases: ["Monster Attack", "Monster Atack", "Monster House 36"],
     sourceUrl: official("strefa-familijna/monster-atack"),
+  }),
+  attraction({
+    id: "swiss-water-cups",
+    name: "Swiss Water Cups",
+    osmId: "way/793929516",
+    officialNumber: 99,
+    zone: "family-zone",
+    location: Object.freeze({ lat: 50.0007196, lon: 19.4073474 }),
+    restrictions: { minAgeWithGuardian: 2, maxAgeWithGuardian: 13, soloHeight: 120 },
+    routeOrder: 105,
+    priority: 66,
+    intensity: "calm",
+    wet: true,
+    durationMinutes: 7,
+    queueAliases: ["Swiss Water Cups 99", "Swis Water Cups"],
+    sourceUrl: official("strefa-familijna/swis-water-cups"),
   }),
   attraction({
     id: "atlantis",
@@ -320,6 +450,22 @@ export const ATTRACTIONS = Object.freeze([
     durationMinutes: 5,
     queueAliases: ["Kopalnia Złota", "Toffifee", "Gold Mine", "Kopalnia Złota 40"],
     sourceUrl: official("strefa-familijna/kopalnia-zlota"),
+  }),
+  attraction({
+    id: "frutti-loop",
+    name: "Frutti Loop",
+    osmId: "way/371626333",
+    officialNumber: 39,
+    zone: "family-zone",
+    location: Object.freeze({ lat: 49.9999911, lon: 19.4103888 }),
+    restrictions: { minAgeWithGuardian: 4, maxAgeWithGuardian: 12, soloHeight: 120 },
+    routeOrder: 145,
+    priority: 77,
+    intensity: "medium",
+    wet: false,
+    durationMinutes: 3,
+    queueAliases: ["Frutti Loop Coaster", "Frutti Loop 39"],
+    sourceUrl: official("strefa-familijna/frutti-loop"),
   }),
   attraction({
     id: "energus",

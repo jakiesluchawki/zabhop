@@ -283,8 +283,24 @@ export function resolveAttractionState(attraction, { queueById = {}, statusById 
   };
 }
 
+function valuesFromIdCollection(values) {
+  if (values === null || values === undefined) return [];
+  if (typeof values === "string" || typeof values === "number") return [values];
+  if (typeof values[Symbol.iterator] === "function") return [...values];
+  return [];
+}
+
+function normalizedIdSet(...collections) {
+  return new Set(
+    collections
+      .flatMap(valuesFromIdCollection)
+      .map(normalizeName)
+      .filter(Boolean),
+  );
+}
+
 function completedSet(completedIds) {
-  return new Set((completedIds ?? []).map(normalizeName));
+  return normalizedIdSet(completedIds);
 }
 
 function isCompleted(attraction, completed) {
@@ -353,24 +369,38 @@ export function buildRoute({
   });
 }
 
-export function chooseNextStop({
+/**
+ * Returns every safe next-stop candidate in deterministic recommendation order.
+ *
+ * `excludedIds` is deliberately separate from `completedIds`: callers can add a
+ * suggestion to it when someone taps "Pokaż inną", then clear it to start a new
+ * recommendation pass without changing completed history. `skippedIds` and
+ * `excludedSuggestionIds` are accepted aliases so persisted UI state can be
+ * migrated without changing the ranking semantics.
+ */
+export function rankNextStops({
   position,
   height = FAMILY_PROFILE.safeHeightCm,
   age = FAMILY_PROFILE.childAge,
   withGuardian = FAMILY_PROFILE.withGuardian,
   completedIds = [],
+  excludedIds = [],
+  skippedIds = [],
+  excludedSuggestionIds = [],
   queueById = {},
   statusById = {},
   attractions = ATTRACTIONS,
 } = {}) {
   const currentPosition = readPosition(position);
-  if (!currentPosition) return null;
+  if (!currentPosition) return [];
   const completed = completedSet(completedIds);
+  const excluded = normalizedIdSet(excludedIds, skippedIds, excludedSuggestionIds);
 
-  const candidates = getEligibleAttractions({ height, age, withGuardian, attractions })
+  return getEligibleAttractions({ height, age, withGuardian, attractions })
     .map((item) => ({ ...item, familyTier: classifyAttractionForFamily(item) }))
     .filter((item) => item.familyTier !== "excluded")
     .filter((item) => !isCompleted(item, completed))
+    .filter((item) => !isCompleted(item, excluded))
     .map((item) => {
       const live = resolveAttractionState(item, { queueById, statusById });
       const distance = distanceMeters(currentPosition, item);
@@ -381,21 +411,27 @@ export function chooseNextStop({
       return { item, live, distance, walk, score };
     })
     .filter((candidate) => candidate.live.isAvailable)
-    .sort((a, b) => b.score - a.score || a.distance - b.distance || a.item.routeOrder - b.item.routeOrder);
+    .sort((a, b) =>
+      b.score - a.score ||
+      a.distance - b.distance ||
+      a.item.routeOrder - b.item.routeOrder ||
+      a.item.id.localeCompare(b.item.id, "pl"),
+    )
+    .map((candidate) => ({
+      ...candidate.item,
+      status: candidate.live.status,
+      queueMinutes: candidate.live.queueMinutes,
+      distanceMeters: Math.round(candidate.distance),
+      walkingMinutes: candidate.walk,
+      score: Math.round(candidate.score * 10) / 10,
+      reason: candidate.live.queueMinutes === null
+        ? `${candidate.walk} min pieszo; brak pewnego czasu kolejki.`
+        : `${candidate.walk} min pieszo i ok. ${Math.round(candidate.live.queueMinutes)} min kolejki.`,
+    }));
+}
 
-  const best = candidates[0];
-  if (!best) return null;
-  return {
-    ...best.item,
-    status: best.live.status,
-    queueMinutes: best.live.queueMinutes,
-    distanceMeters: Math.round(best.distance),
-    walkingMinutes: best.walk,
-    score: Math.round(best.score * 10) / 10,
-    reason: best.live.queueMinutes === null
-      ? `${best.walk} min pieszo; brak pewnego czasu kolejki.`
-      : `${best.walk} min pieszo i ok. ${Math.round(best.live.queueMinutes)} min kolejki.`,
-  };
+export function chooseNextStop(options = {}) {
+  return rankNextStops(options)[0] ?? null;
 }
 
 export function findNearestToilet(position, toilets = TOILETS) {

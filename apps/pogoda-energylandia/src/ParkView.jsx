@@ -33,10 +33,10 @@ import {
 import {
   buildRoute,
   classifyAttractionForFamily,
-  chooseNextStop,
   distanceMeters,
   FAMILY_PROFILE,
   findNearestToilet,
+  rankNextStops,
   walkingMinutes,
 } from "./parkLogic.js";
 import {
@@ -46,6 +46,7 @@ import {
   queueLabel,
   QUEUE_SOURCE_URL,
 } from "./queues.js";
+import { evaluateRainAlert, RAIN_ALERT_STATE } from "./rainAlert.js";
 
 const COMPLETED_KEY = "pogodapark-completed-v1";
 const TOILET_KEY = "pogodapark-last-toilet-v1";
@@ -79,7 +80,9 @@ function asToiletResult(result, origin) {
 
 function formatFreshness(timestamp) {
   if (!timestamp) return "brak czasu";
-  const minutes = Math.max(0, Math.round((Date.now() - Number(timestamp)) / 60000));
+  const parsed = typeof timestamp === "number" ? timestamp : new Date(timestamp).getTime();
+  if (!Number.isFinite(parsed)) return "brak czasu";
+  const minutes = Math.max(0, Math.round((Date.now() - parsed) / 60000));
   return minutes < 1 ? "przed chwilą" : `${minutes} min temu`;
 }
 
@@ -101,6 +104,16 @@ function zoneName(zone) {
 
 function intensityLabel(intensity) {
   return intensity === "calm" ? "spokojna" : intensity === "high" ? "mocna" : "rodzinna";
+}
+
+function formatParkDistance(meters, accuracy = null) {
+  if (!Number.isFinite(meters) || meters < 0) return null;
+  const approximate = Number.isFinite(accuracy) && accuracy > 40;
+  if (meters < 1000) {
+    const rounded = approximate ? Math.max(10, Math.round(meters / 10) * 10) : Math.max(5, Math.round(meters / 5) * 5);
+    return `${approximate ? "≈" : ""}${rounded} m`;
+  }
+  return `${approximate ? "≈" : ""}${(meters / 1000).toLocaleString("pl-PL", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} km`;
 }
 
 function weatherNow(weather) {
@@ -138,6 +151,11 @@ function ParkSourcesSheet({ onClose }) {
       name: "Queue-Times",
       detail: "nieoficjalny odczyt statusów i czasów kolejek",
       href: QUEUE_SOURCE_URL,
+    },
+    {
+      name: "Antistorm Wadowice",
+      detail: "nowcast opadu i burzy przeliczany co około 15 min",
+      href: "https://antistorm.eu/deweloperzy.php",
     },
     {
       name: "Relacje rodzinne 2025–2026",
@@ -309,7 +327,7 @@ function MapNavigationSheet({ attraction, sequence, onClose }) {
   );
 }
 
-export function ParkView({ weather }) {
+export function ParkView({ weather, onRefreshNowcast, nowcastRefreshing = false }) {
   const [completedIds, setCompletedIds] = useState(() => {
     const stored = loadStored(COMPLETED_KEY, []);
     return Array.isArray(stored)
@@ -326,15 +344,81 @@ export function ParkView({ weather }) {
   const [mapMode, setMapMode] = useState("route");
   const [sheet, setSheet] = useState(null);
   const [navigationStop, setNavigationStop] = useState(null);
+  const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState([]);
+  const [analysisNotice, setAnalysisNotice] = useState("");
+  const [alertClock, setAlertClock] = useState(() => Date.now());
   const [lastToiletAt, setLastToiletAt] = useState(() => Number(window.localStorage.getItem(TOILET_KEY)) || Date.now());
   const watchRef = useRef(null);
 
   const familyHeight = FAMILY_PROFILE.safeHeightCm;
+  const livePosition = locationStatus === "ready" ? position : null;
+  const gpsAccuracy = Number(livePosition?.accuracy);
+  const weakGps = Number.isFinite(gpsAccuracy) && gpsAccuracy > 80;
+  const recommendationPosition = livePosition && (!Number.isFinite(gpsAccuracy) || gpsAccuracy <= 120)
+    ? livePosition
+    : { lat: 50.00015, lon: 19.4058 };
   const weatherSummary = useMemo(() => weatherNow(weather), [weather]);
+  const rainAlert = useMemo(() => evaluateRainAlert({
+    antistorm: weather?.antistorm,
+    antistormCheckedAt: weather?.antistorm?.updatedAt,
+    hours: weather?.days?.[weather?.today] || [],
+    now: new Date(alertClock),
+    carWalkMinutes: 30,
+  }), [weather, alertClock]);
+
+  const rainAlertEvidence = rainAlert.evidence.find((item) => item.source === "antistorm") || null;
+  const nearbyStormEta = rainAlertEvidence?.stormEta;
+  const immediateStorm = rainAlert.hazard === "storm" && Number.isFinite(rainAlert.etaMinutes)
+    && rainAlert.etaMinutes <= 15;
+  const alertWatch = rainAlert.state === RAIN_ALERT_STATE.CLEAR
+    && Number.isFinite(rainAlert.etaMinutes)
+    && rainAlert.etaMinutes <= 60;
+  const rainAlertUi = rainAlert.state === RAIN_ALERT_STATE.RAINING
+    ? {
+      tone: "danger",
+      title: "Schowajcie się teraz",
+      detail: `Antistorm sygnalizuje opad już teraz${Number.isFinite(nearbyStormEta) ? ` i burzę za około ${nearbyStormEta} min` : ""}. Zostańcie w bezpiecznym zadaszeniu; do auta idźcie dopiero, gdy przejście będzie bezpieczne.`,
+    }
+    : rainAlert.state === RAIN_ALERT_STATE.LEAVE_NOW
+      ? immediateStorm
+        ? {
+          tone: "danger",
+          title: `Burza może być za ${rainAlert.etaMinutes} min`,
+          detail: "Na 30-minutowy marsz do auta jest już za późno. Zejdźcie z otwartej przestrzeni i schrońcie się w najbliższym bezpiecznym budynku.",
+        }
+        : {
+          tone: "danger",
+          title: `Ruszajcie w stronę auta teraz`,
+          detail: `${rainAlert.hazard === "storm" ? "Burza" : "Opad"} może dotrzeć za około ${rainAlert.etaMinutes} min. Z głębi parku załóżcie orientacyjnie 25–30 min do samochodu.`,
+        }
+      : rainAlert.state === RAIN_ALERT_STATE.UNAVAILABLE
+        ? {
+          tone: "unknown",
+          title: rainAlert.reason === "stale" ? "Nowcast jest nieaktualny" : "Łączę alert opadowy",
+          detail: rainAlert.reason === "stale"
+            ? "Nie zakładamy, że jest spokojnie. Odświeżcie Antistorm albo sprawdźcie radar bezpośrednio."
+            : "Bez świeżego nowcastu aplikacja nie będzie udawać, że najbliższe 30 minut jest bezpieczne.",
+        }
+        : alertWatch
+          ? {
+            tone: "watch",
+            title: `Sygnał za około ${rainAlert.etaMinutes} min`,
+            detail: "Jeszcze nie alarm, ale pamiętajcie: z głębi parku powrót do samochodu może zająć około 25–30 min.",
+          }
+          : {
+            tone: "calm",
+            title: "Brak pilnego sygnału do 30 min",
+            detail: "Antistorm nie pokazuje teraz wiarygodnego opadu ani burzy w oknie potrzebnym na dojście do auta.",
+          };
 
   useEffect(() => {
     window.localStorage.setItem(COMPLETED_KEY, JSON.stringify(completedIds));
   }, [completedIds]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setAlertClock(Date.now()), 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => () => {
     if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
@@ -387,39 +471,57 @@ export function ParkView({ weather }) {
   }), [familyHeight]);
   const completedIdSet = useMemo(() => new Set(completedIds), [completedIds]);
 
-  const nextStop = useMemo(() => chooseNextStop({
-    position,
+  const rankedStops = useMemo(() => rankNextStops({
+    position: recommendationPosition,
+    height: familyHeight,
+    age: FAMILY_PROFILE.childAge,
+    completedIds,
+    excludedIds: dismissedSuggestionIds,
+    queueById,
+  }), [recommendationPosition, familyHeight, completedIds, dismissedSuggestionIds, queueById]);
+  const allRankedStops = useMemo(() => rankNextStops({
+    position: recommendationPosition,
     height: familyHeight,
     age: FAMILY_PROFILE.childAge,
     completedIds,
     queueById,
-  }) || route.find((stop) => stop.familyTier === "primary") || route[0] || null, [position, familyHeight, completedIds, queueById, route]);
+  }), [recommendationPosition, familyHeight, completedIds, queueById]);
+  const nextStop = rankedStops[0] || null;
 
   const selectedStop = fullRoute.find((stop) => stop.id === selectedId)
     || ATTRACTIONS.find((stop) => stop.id === selectedId)
     || nextStop;
-  const currentOrigin = position || locationOf(nextStop);
+  const currentOrigin = livePosition || locationOf(nextStop);
   const nearest = useMemo(() => asToiletResult(
     findNearestToilet(currentOrigin),
     currentOrigin,
   ), [currentOrigin]);
   const nextQueue = queueForAttraction(nextStop, queues);
   const realWait = cautiousWait(nextQueue?.waitTime);
-  const nextDistance = position && nextStop
-    ? distanceMeters(position, locationOf(nextStop))
+  const nextDistance = livePosition && nextStop
+    ? distanceMeters(livePosition, locationOf(nextStop))
     : Number(nextStop?.distanceFromPreviousMeters ?? nextStop?.distanceMeters ?? 0);
   const toiletDue = Date.now() - lastToiletAt > 75 * 60 * 1000 || (realWait || 0) > 15;
-  const outsidePark = position && distanceMeters(position, { lat: 50.00025, lng: 19.4058 }) > 1800;
+  const outsidePark = livePosition && (!Number.isFinite(gpsAccuracy) || gpsAccuracy <= 250)
+    && distanceMeters(livePosition, { lat: 50.00025, lng: 19.4058 }) > 1800;
 
   useEffect(() => {
     if (!selectedId && nextStop) setSelectedId(nextStop.id);
   }, [nextStop, selectedId]);
 
+  useEffect(() => {
+    if (!nextStop && dismissedSuggestionIds.length > 0) setDismissedSuggestionIds([]);
+  }, [nextStop, dismissedSuggestionIds.length]);
+
   const locate = useCallback(() => {
     if (!navigator.geolocation) {
+      setPosition(null);
+      setFocus(null);
       setLocationStatus("unsupported");
       return;
     }
+    setPosition(null);
+    setFocus(null);
     setLocationStatus("loading");
     if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
     watchRef.current = navigator.geolocation.watchPosition(
@@ -429,10 +531,68 @@ export function ParkView({ weather }) {
         setFocus(next);
         setLocationStatus("ready");
       },
-      () => setLocationStatus("denied"),
+      (error) => {
+        setPosition(null);
+        setFocus(null);
+        if (error?.code === 1) {
+          if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
+          watchRef.current = null;
+          setLocationStatus("denied");
+          return;
+        }
+        setLocationStatus(error?.code === 3 ? "timeout" : "unavailable");
+      },
       { enableHighAccuracy: true, maximumAge: 8000, timeout: 15000 },
     );
   }, []);
+
+  const stopLocation = useCallback(() => {
+    if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+    watchRef.current = null;
+    setPosition(null);
+    setFocus(null);
+    setLocationStatus("idle");
+  }, []);
+
+  useEffect(() => {
+    let permission = null;
+    let cancelled = false;
+    const syncPermission = () => {
+      if (cancelled || !permission) return;
+      if (permission.state === "granted") {
+        if (watchRef.current == null) locate();
+      } else if (permission.state === "denied") {
+        if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+        watchRef.current = null;
+        setPosition(null);
+        setFocus(null);
+        setLocationStatus("denied");
+      } else {
+        setPosition(null);
+        setFocus(null);
+        setLocationStatus("idle");
+      }
+    };
+
+    if (!navigator.geolocation) {
+      setLocationStatus("unsupported");
+      return undefined;
+    }
+    if (!navigator.permissions?.query) return undefined;
+    navigator.permissions.query({ name: "geolocation" }).then((result) => {
+      if (cancelled) return;
+      permission = result;
+      syncPermission();
+      permission.addEventListener?.("change", syncPermission);
+    }).catch(() => {
+      // Safari nie zawsze udostępnia Permissions API. Wtedy czekamy na
+      // świadome kliknięcie użytkownika i nie wywołujemy okna zgody sami.
+    });
+    return () => {
+      cancelled = true;
+      permission?.removeEventListener?.("change", syncPermission);
+    };
+  }, [locate]);
 
   const markDone = useCallback((id) => {
     if (!id) return;
@@ -440,6 +600,8 @@ export function ParkView({ weather }) {
     setSelectedId(null);
     setFocus(null);
     setNavigationStop(null);
+    setDismissedSuggestionIds([]);
+    setAnalysisNotice("Plan przeliczony po zaliczeniu atrakcji.");
   }, []);
 
   const toggleCompleted = useCallback((id) => {
@@ -449,7 +611,33 @@ export function ParkView({ weather }) {
       : [...current, id]);
     setSelectedId((current) => current === id ? null : current);
     setFocus(null);
+    setDismissedSuggestionIds([]);
+    setAnalysisNotice("Plan przeliczony po zmianie historii.");
   }, []);
+
+  const showAnotherSuggestion = useCallback(() => {
+    if (!nextStop) return;
+    const nextDismissed = [...new Set([...dismissedSuggestionIds, nextStop.id])];
+    const remaining = allRankedStops.filter((candidate) => !nextDismissed.includes(candidate.id));
+    if (remaining.length === 0) {
+      setDismissedSuggestionIds([]);
+      setAnalysisNotice("To był ostatni sensowny wariant — wracam do początku rankingu.");
+    } else {
+      setDismissedSuggestionIds(nextDismissed);
+      setAnalysisNotice(`Pokazuję kolejną bezpieczną opcję. Zostało ${remaining.length}.`);
+    }
+    setSelectedId(null);
+    setFocus(null);
+  }, [allRankedStops, dismissedSuggestionIds, nextStop]);
+
+  const reanalyze = useCallback(async () => {
+    setDismissedSuggestionIds([]);
+    setAnalysisNotice("Odświeżam kolejki i układam rekomendację od nowa…");
+    await refreshQueues();
+    setSelectedId(null);
+    setFocus(null);
+    setAnalysisNotice("Gotowe — rekomendacja uwzględnia zaliczone atrakcje, kolejki i aktualny GPS.");
+  }, [refreshQueues]);
 
   const selectAttraction = useCallback((attraction) => {
     setMapMode("route");
@@ -485,10 +673,35 @@ export function ParkView({ weather }) {
   const navigationSequence = navigationStop
     ? displayRoute.findIndex((stop) => stop.id === navigationStop.id) + 1
     : 0;
+  const allFamilyStopsCompleted = displayRoute.length > 0
+    && displayRoute.every((stop) => completedIdSet.has(stop.id));
+
+  const locationUi = locationStatus === "ready" && livePosition
+    ? {
+      title: weakGps ? "Odległości orientacyjne" : "Odległości na żywo",
+      detail: weakGps
+        ? `Słabszy GPS · dokładność około ${Math.round(gpsAccuracy)} m. Nie wpływa na wybór następnej atrakcji.`
+        : `GPS działa${Number.isFinite(gpsAccuracy) ? ` · dokładność około ${Math.round(gpsAccuracy)} m` : ""}`,
+      action: "Wyłącz",
+    }
+    : locationStatus === "loading"
+      ? { title: "Ustalam pozycję…", detail: "Pierwszy odczyt może potrwać kilkanaście sekund.", action: "Szukam…" }
+      : locationStatus === "denied"
+        ? { title: "Lokalizacja jest zablokowana", detail: "Zezwól na dostęp w ustawieniach strony, aby zobaczyć dojścia.", action: "Spróbuj" }
+        : locationStatus === "unsupported"
+          ? { title: "Brak obsługi lokalizacji", detail: "Ta przeglądarka nie udostępnia GPS. Trasa nadal działa strefami.", action: "Niedostępne" }
+          : locationStatus === "timeout"
+            ? { title: "GPS potrzebuje więcej czasu", detail: "Wyjdź na otwartą przestrzeń i spróbuj ponownie.", action: "Ponów" }
+            : locationStatus === "unavailable"
+              ? { title: "Nie udało się ustalić pozycji", detail: "Sygnał GPS jest chwilowo niedostępny. Trasa nadal działa.", action: "Ponów" }
+              : { title: "Włącz odległości z GPS", detail: "Przy każdej atrakcji pokażemy metry i orientacyjny czas marszu.", action: "Włącz" };
 
   const renderRouteRow = (stop, index) => {
     const queue = queueForAttraction(stop, queues);
     const completed = completedIdSet.has(stop.id);
+    const liveDistance = livePosition ? distanceMeters(livePosition, locationOf(stop)) : null;
+    const distanceLabel = formatParkDistance(liveDistance, gpsAccuracy);
+    const walkLabel = distanceLabel ? `~${walkingMinutes(liveDistance)} min` : null;
     return (
       <div
         className={`route-item tier-${stop.familyTier} ${stop.id === selectedStop?.id ? "selected" : ""} ${completed ? "completed" : ""}`}
@@ -503,7 +716,13 @@ export function ParkView({ weather }) {
         >
           <span className="route-number">{index + 1}</span>
           <span className="route-copy"><strong>{stop.name}</strong><small>{zoneName(stop.zone)} • {restrictionLabel(stop)}</small></span>
-          <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""} ${completed ? "completed" : ""}`}>{completed ? "zaliczone" : queueLabel(queue)}</span>
+          <span className="route-meta">
+            <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""} ${completed ? "completed" : ""}`}>{completed ? "zaliczone" : queueLabel(queue)}</span>
+            <span className={`route-distance ${distanceLabel ? "live" : ""}`}>
+              <Footprints size={11} weight="bold" aria-hidden="true" />
+              {distanceLabel ? `${distanceLabel} · ${walkLabel}` : "włącz GPS"}
+            </span>
+          </span>
           <CaretRight size={17} aria-hidden="true" />
         </button>
         <button
@@ -540,6 +759,34 @@ export function ParkView({ weather }) {
           <span className="primary"><i /> <strong>Zielone</strong> próg 120 cm</span>
           <span className="secondary"><i /> <strong>Żółte</strong> 100–110 cm lub wg wieku</span>
         </div>
+
+        <section
+          className={`rain-safety-alert ${rainAlertUi.tone}`}
+          role={rainAlertUi.tone === "danger" ? "alert" : "status"}
+          aria-live={rainAlertUi.tone === "danger" ? "assertive" : "polite"}
+          aria-label="Alert opadowy Antistorm"
+        >
+          <div className="rain-safety-main">
+            {rainAlertUi.tone === "danger"
+              ? <WarningCircle size={25} weight="fill" aria-hidden="true" />
+              : <CloudRain size={25} weight="duotone" aria-hidden="true" />}
+            <span>
+              <small className="rain-safety-kicker">ANTISTORM • DROGA DO AUTA 25–30 MIN</small>
+              <strong>{rainAlertUi.title}</strong>
+              <p>{rainAlertUi.detail}</p>
+            </span>
+          </div>
+          <div className="rain-safety-meta">
+            <a href="https://antistorm.eu/" target="_blank" rel="noreferrer">
+              {rainAlertEvidence?.station || "Wadowice"} • {weather?.antistorm?.updatedAt ? `sprawdzone ${formatFreshness(weather.antistorm.updatedAt)}` : "brak świeżego odczytu"}
+            </a>
+            <button type="button" onClick={() => onRefreshNowcast?.()} disabled={!onRefreshNowcast || nowcastRefreshing}>
+              <ArrowClockwise size={15} weight="bold" className={nowcastRefreshing ? "spin" : ""} aria-hidden="true" />
+              {nowcastRefreshing ? "Sprawdzam" : "Odśwież"}
+            </button>
+          </div>
+          <small className="rain-safety-limit">Sprawdzamy co 5 min, gdy strona jest otwarta; Antistorm przelicza dane mniej więcej co 15 min. Dokładne miejsce auta nie jest znane.</small>
+        </section>
 
         {weatherSummary && (
           <div className={`park-weather ${weatherSummary.rainSoon ? "rain" : ""}`}>
@@ -579,11 +826,27 @@ export function ParkView({ weather }) {
                 <Check size={20} weight="bold" /> Zrobione
               </button>
             </div>
+            <div className="next-stop-analysis-actions" aria-label="Zmień rekomendację">
+              <button type="button" onClick={showAnotherSuggestion} disabled={allRankedStops.length < 2}>
+                <Sparkle size={17} weight="duotone" /> Pokaż inną
+              </button>
+              <button type="button" onClick={reanalyze} disabled={queueRefreshing}>
+                <ArrowClockwise size={17} weight="bold" /> {queueRefreshing ? "Przeliczam…" : "Przelicz teraz"}
+              </button>
+            </div>
+            {analysisNotice && <p className="analysis-notice" role="status" aria-live="polite">{analysisNotice}</p>}
           </section>
         ) : (
-          <section className="route-finished">
-            <CheckCircle size={34} weight="fill" aria-hidden="true" />
-            <div><p className="eyebrow">PLAN ZREALIZOWANY</p><h2>Macie rodzinny komplet.</h2><p>Teraz wybierzcie powtórkę bez gonienia przez cały park.</p></div>
+          <section className={`route-finished ${allFamilyStopsCompleted ? "completed" : "unavailable"}`}>
+            {allFamilyStopsCompleted
+              ? <CheckCircle size={34} weight="fill" aria-hidden="true" />
+              : <WarningCircle size={34} weight="fill" aria-hidden="true" />}
+            <div>
+              <p className="eyebrow">{allFamilyStopsCompleted ? "PLAN ZREALIZOWANY" : "BRAK PEWNEJ PROPOZYCJI"}</p>
+              <h2>{allFamilyStopsCompleted ? "Macie rodzinny komplet." : "To nie znaczy, że wszystko zaliczone."}</h2>
+              <p>{allFamilyStopsCompleted ? "Teraz wybierzcie powtórkę bez gonienia przez cały park." : "Dane pokazują pozostałe atrakcje jako zamknięte. Odświeżcie kolejki albo wybierzcie punkt z pełnej listy."}</p>
+              {!allFamilyStopsCompleted && <button type="button" onClick={reanalyze} disabled={queueRefreshing}><ArrowClockwise size={17} weight="bold" /> {queueRefreshing ? "Sprawdzam…" : "Sprawdź ponownie"}</button>}
+            </div>
           </section>
         )}
 
@@ -606,7 +869,7 @@ export function ParkView({ weather }) {
           <ParkMap
             attractions={mapRoute}
             toilets={TOILETS}
-            position={position}
+            position={livePosition}
             selectedId={selectedId}
             focus={focus}
             showToilets={mapMode === "toilets"}
@@ -614,9 +877,9 @@ export function ParkView({ weather }) {
           />
           <p className="map-help"><MapPin size={14} weight="fill" aria-hidden="true" /> Dotknij numeru lub pozycji na liście, żeby zobaczyć opis, zdjęcie i prowadzenie.</p>
           <div className="map-actions">
-            <button type="button" onClick={locate} className={locationStatus === "ready" ? "located" : ""}>
+            <button type="button" onClick={locationStatus === "ready" ? stopLocation : locate} className={locationStatus === "ready" ? "located" : ""}>
               <Crosshair size={18} weight="bold" />
-              {locationStatus === "loading" ? "Szukam…" : locationStatus === "ready" ? "Pozycja włączona" : "Znajdź nas"}
+              {locationStatus === "loading" ? "Szukam…" : locationStatus === "ready" ? "Wyłącz GPS" : "Znajdź nas"}
             </button>
             <button type="button" onClick={showNearestToilet} disabled={!nearest.toilet}>
               <Toilet size={18} weight="bold" /> Najbliższe WC
@@ -632,6 +895,22 @@ export function ParkView({ weather }) {
             <span className="route-progress">{completedIdSet.size}/{displayRoute.length}</span>
           </div>
           <p className="route-intro">Najpierw zielone hity od 120 cm: Sweet Valley → Aqualantis → Formuła → Strefa Familijna. Żółte traktujcie jako zapas po drodze.</p>
+
+          <div className={`route-location-control ${locationStatus}`}>
+            <Crosshair size={21} weight="bold" aria-hidden="true" />
+            <span role="status" aria-live="polite">
+              <strong>{locationUi.title}</strong>
+              <small>{locationUi.detail}</small>
+            </span>
+            <button
+              type="button"
+              onClick={locationStatus === "ready" ? stopLocation : locate}
+              disabled={locationStatus === "loading" || locationStatus === "unsupported"}
+              aria-pressed={locationStatus === "ready"}
+            >
+              {locationUi.action}
+            </button>
+          </div>
 
           {primaryRoute.length > 0 && (
             <div className="route-group primary">
