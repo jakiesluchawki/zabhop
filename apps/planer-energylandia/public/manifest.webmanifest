@@ -1,0 +1,10 @@
+{
+  "name": "Plan dla was — Energylandia",
+  "short_name": "Plan Energylandia",
+  "description": "Spersonalizowana trasa po Energylandii dla całej grupy.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7e7e1",
+  "theme_color": "#f7e7e1",
+  "lang": "pl"
+}
