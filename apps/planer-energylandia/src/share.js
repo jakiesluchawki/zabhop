@@ -873,12 +873,23 @@ export function sanitizeSharedPlan(input) {
   return { ...plan, safety, firstAttractionId };
 }
 
-export function encodePlan(plan) {
+// The short-link service only accepts the compact v2 representation. Keeping
+// this separate from `encodePlan` lets old, fully self-contained links remain
+// readable without ever uploading a verbose legacy snapshot by accident.
+export function encodeCompactPlan(plan) {
   const sanitized = sanitizeSharedPlan(plan);
   if (!sanitized) return "";
 
   const compactSnapshot = compactSnapshotFromPlan(sanitized);
-  if (compactSnapshot) return toBase64Url(JSON.stringify(compactSnapshot));
+  return compactSnapshot ? toBase64Url(JSON.stringify(compactSnapshot)) : "";
+}
+
+export function encodePlan(plan) {
+  const compactPayload = encodeCompactPlan(plan);
+  if (compactPayload) return compactPayload;
+
+  const sanitized = sanitizeSharedPlan(plan);
+  if (!sanitized) return "";
 
   // Wiek i wzrost są potrzebne do ponownej weryfikacji ograniczeń atrakcji.
   // Imiona i potencjalnie identyfikujące ID nie są — link dostaje neutralne
@@ -944,11 +955,161 @@ export function planFromHash(hash = window.location.hash) {
   return match ? decodePlan(match[1]) : null;
 }
 
-export function createPlanUrl(plan) {
-  const url = new URL(window.location.href);
+function currentHref(fallback = "https://example.invalid/") {
+  return typeof window !== "undefined" && window.location?.href ? window.location.href : fallback;
+}
+
+export function createPlanUrl(plan, href = currentHref()) {
+  const url = new URL(href);
   const payload = encodePlan(plan);
   url.hash = payload ? `plan=${payload}` : "";
   return url.toString();
+}
+
+// 16 URL-safe Base64 characters encode 96 bits: short enough to read in a
+// message, still far beyond practical guessing for an opaque plan reference.
+export const SHORT_PLAN_TOKEN_PATTERN = /^[A-Za-z0-9_-]{16}$/;
+export const SHORTLINK_API_ENV = "VITE_SHORTLINK_API";
+
+// Production injects this at build time. A runtime override is deliberately
+// supported for local previews and makes the deployment target a one-line
+// configuration change, rather than baking an account-specific Workers URL
+// into the share format.
+export const SHORTLINK_API_FALLBACK = "";
+
+function configuredShortLinkApi() {
+  const buildValue = typeof import.meta.env?.VITE_SHORTLINK_API === "string"
+    ? import.meta.env.VITE_SHORTLINK_API
+    : "";
+  const runtimeValue = typeof globalThis !== "undefined" && typeof globalThis.__ENERGYLANDIA_SHORTLINK_API__ === "string"
+    ? globalThis.__ENERGYLANDIA_SHORTLINK_API__
+    : "";
+  return buildValue || runtimeValue || SHORTLINK_API_FALLBACK;
+}
+
+export function shortLinkApiBase(apiBase = configuredShortLinkApi()) {
+  const value = String(apiBase || "").trim().replace(/\/+$/, "");
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return null;
+  }
+}
+
+export class ShortLinkError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = "ShortLinkError";
+    this.code = code;
+  }
+}
+
+function requireShortLinkApi(apiBase) {
+  const resolved = shortLinkApiBase(apiBase);
+  if (!resolved) {
+    throw new ShortLinkError(
+      "not-configured",
+      "Usługa krótkich linków nie jest teraz skonfigurowana. Spróbuj ponownie za chwilę.",
+    );
+  }
+  return resolved;
+}
+
+function requireFetch(fetchImpl) {
+  const resolved = fetchImpl ?? globalThis.fetch;
+  if (typeof resolved !== "function") {
+    throw new ShortLinkError("unavailable", "Ta przeglądarka nie może teraz połączyć się z usługą krótkich linków.");
+  }
+  return resolved;
+}
+
+async function jsonResponse(response, action) {
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    // The status below remains useful even when an intermediary returned HTML.
+  }
+  if (!response.ok) {
+    const code = response.status === 404 ? "not-found" : response.status === 429 ? "rate-limited" : "request-failed";
+    const fallback = action === "read"
+      ? "Nie znaleźliśmy tego krótkiego planu. Link mógł wygasnąć lub być niepełny."
+      : "Nie udało się utworzyć krótkiego linku. Spróbuj ponownie za chwilę.";
+    throw new ShortLinkError(code, typeof body?.error === "string" ? body.error : fallback);
+  }
+  if (!body || typeof body !== "object") {
+    throw new ShortLinkError("invalid-response", "Usługa krótkich linków zwróciła nieprawidłową odpowiedź.");
+  }
+  return body;
+}
+
+export function shortPlanTokenFromHash(hash = typeof window !== "undefined" ? window.location.hash : "") {
+  const match = String(hash).match(/^#p\/([A-Za-z0-9_-]{16})$/);
+  return match ? match[1] : null;
+}
+
+export function hasShortPlanHash(hash = typeof window !== "undefined" ? window.location.hash : "") {
+  return /^#p(?:\/|$)/.test(String(hash));
+}
+
+export function createShortPlanUrl(token, href = currentHref()) {
+  if (!SHORT_PLAN_TOKEN_PATTERN.test(String(token || ""))) return "";
+  const url = new URL(href);
+  url.hash = `p/${token}`;
+  return url.toString();
+}
+
+export async function createShortPlanLink(plan, { apiBase, fetchImpl, href } = {}) {
+  const payload = encodeCompactPlan(plan);
+  if (!payload) {
+    throw new ShortLinkError("invalid-plan", "Ten plan nie może zostać bezpiecznie zapisany jako krótki link.");
+  }
+  const base = requireShortLinkApi(apiBase);
+  const fetcher = requireFetch(fetchImpl);
+  let response;
+  try {
+    response = await fetcher(`${base}/plans`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ payload }),
+    });
+  } catch (error) {
+    if (error instanceof ShortLinkError) throw error;
+    throw new ShortLinkError("network", "Nie udało się połączyć z usługą krótkich linków. Sprawdź internet i spróbuj ponownie.");
+  }
+  const body = await jsonResponse(response, "create");
+  const token = typeof body.token === "string" ? body.token : "";
+  if (!SHORT_PLAN_TOKEN_PATTERN.test(token)) {
+    throw new ShortLinkError("invalid-response", "Usługa krótkich linków zwróciła nieprawidłową odpowiedź.");
+  }
+  return createShortPlanUrl(token, href);
+}
+
+export async function loadShortPlan(token, { apiBase, fetchImpl } = {}) {
+  if (!SHORT_PLAN_TOKEN_PATTERN.test(String(token || ""))) {
+    throw new ShortLinkError("invalid-token", "Ten krótki link wygląda na niepełny.");
+  }
+  const base = requireShortLinkApi(apiBase);
+  const fetcher = requireFetch(fetchImpl);
+  let response;
+  try {
+    response = await fetcher(`${base}/plans/${encodeURIComponent(token)}`, {
+      headers: { accept: "application/json" },
+    });
+  } catch (error) {
+    if (error instanceof ShortLinkError) throw error;
+    throw new ShortLinkError("network", "Nie udało się pobrać krótkiego planu. Sprawdź internet i spróbuj ponownie.");
+  }
+  const body = await jsonResponse(response, "read");
+  const payload = typeof body.payload === "string" ? body.payload : "";
+  const plan = decodePlan(payload);
+  if (!plan) {
+    throw new ShortLinkError("invalid-plan", "Ten krótki link nie zawiera bezpiecznego, czytelnego planu.");
+  }
+  return plan;
 }
 
 export function createEmailDraftUrl(email, planUrl, plan) {
