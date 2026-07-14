@@ -975,7 +975,9 @@ export const SHORTLINK_API_ENV = "VITE_SHORTLINK_API";
 // supported for local previews and makes the deployment target a one-line
 // configuration change, rather than baking an account-specific Workers URL
 // into the share format.
-export const SHORTLINK_API_FALLBACK = "";
+// Public Worker endpoint. The user-facing URL remains GitHub Pages; this only
+// stores the anonymous compact payload behind its opaque share token.
+export const SHORTLINK_API_FALLBACK = "https://energylandia-shortlinks.mieszko-93c.workers.dev";
 
 function configuredShortLinkApi() {
   const buildValue = typeof import.meta.env?.VITE_SHORTLINK_API === "string"
@@ -1038,7 +1040,16 @@ async function jsonResponse(response, action) {
     const fallback = action === "read"
       ? "Nie znaleźliśmy tego krótkiego planu. Link mógł wygasnąć lub być niepełny."
       : "Nie udało się utworzyć krótkiego linku. Spróbuj ponownie za chwilę.";
-    throw new ShortLinkError(code, typeof body?.error === "string" ? body.error : fallback);
+    const serviceMessages = {
+      invalid_plan: "Ten plan nie przeszedł kontroli bezpieczeństwa krótkiego linku. Przelicz go i spróbuj ponownie.",
+      payload_too_large: "Ten plan jest zbyt duży dla krótkiego linku. Przelicz go i spróbuj ponownie.",
+      origin_required: "Krótki link można utworzyć tylko bezpośrednio w aplikacji PogodaPark.",
+      origin_not_allowed: "Ta strona nie ma dostępu do usługi krótkich linków.",
+      storage_unavailable: "Usługa krótkich linków jest chwilowo niedostępna. Spróbuj ponownie za moment.",
+      not_found: "Nie znaleźliśmy tego krótkiego planu. Link mógł wygasnąć lub być niepełny.",
+    };
+    const message = typeof body?.error === "string" ? serviceMessages[body.error] : null;
+    throw new ShortLinkError(code, message || fallback);
   }
   if (!body || typeof body !== "object") {
     throw new ShortLinkError("invalid-response", "Usługa krótkich linków zwróciła nieprawidłową odpowiedź.");

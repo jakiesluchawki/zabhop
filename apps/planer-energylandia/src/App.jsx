@@ -1168,7 +1168,7 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
         </section>
 
         <section className="export-section" aria-labelledby="export-title">
-          <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>Link nie zawiera imion ani bieżącej lokalizacji, ale zachowuje wiek, wzrost i role potrzebne do sprawdzenia bezpieczeństwa. Stan „zaliczone” zostaje tylko na tym telefonie.</p>
+          <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>W krótkim linku nie ma imion ani bieżącej lokalizacji. Anonimowy plan z rolą, wiekiem i wzrostem jest przechowywany maksymalnie 90 dni, żeby dało się go otworzyć w komunikatorze. Stan „zaliczone” zostaje tylko na tym telefonie.</p>
           <div className="export-actions"><button type="button" onClick={share} disabled={shortLinkStatus === "loading"}><ShareNetwork size={21} weight="bold" /> {shortLinkStatus === "loading" ? "Tworzę link…" : "Udostępnij plan"}</button><button type="button" onClick={copy} disabled={shortLinkStatus === "loading"}><Copy size={21} weight="bold" /> {shortLinkStatus === "loading" ? "Tworzę link…" : "Kopiuj link"}</button><button type="button" onClick={() => setShowPdfPreview(true)}><Printer size={21} weight="bold" /> Przygotuj piękny PDF</button></div>
           {shortLinkStatus === "loading" && <p className="data-status" role="status"><span />Tworzę krótki, klikalny link do tego planu…</p>}
           {shortLinkStatus === "ready" && <p className="data-status" role="status"><span className="ready" />Krótki link jest gotowy — działa w WhatsAppie i Signalu.</p>}
