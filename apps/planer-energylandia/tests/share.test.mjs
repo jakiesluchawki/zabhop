@@ -226,35 +226,65 @@ test("link anonimizuje nazwy i ID, zachowując dane wymagane do kontroli bezpiec
   assert.equal(decoded.safety.valid, true);
 });
 
-test("dobrowolny pokaz z oficjalnym opisem przechodzi bezpiecznie przez link", () => {
+test("dobrowolny pokaz zachowuje bezpieczny termin oraz oficjalne odnośniki w krótkim linku", () => {
   const plan = planWithOfficialShow();
   const decoded = decodePlan(encodePlan(plan));
 
   assert.ok(decoded);
   assert.equal(decoded.profile.entertainment.includeShows, true);
   const show = decoded.days[0].steps.find((step) => step.kind === "show");
-  assert.deepEqual(show, {
+  assert.deepEqual({
+    id: show.id,
+    kind: show.kind,
+    showId: show.showId,
+    title: show.title,
+    venue: show.venue,
+    officialUrl: show.officialUrl,
+    mapUrl: show.mapUrl,
+    startMin: show.startMin,
+    performanceStartMin: show.performanceStartMin,
+    endMin: show.endMin,
+    durationMinutes: show.durationMinutes,
+    performanceTimes: show.performanceTimes,
+    walkingMinutes: show.walkingMinutes,
+    sourceCheckedAt: show.sourceCheckedAt,
+  }, {
     id: "day-1-show-funny-in-sweet-valley-show-1120",
     kind: "show",
     showId: "funny-in-sweet-valley-show",
     title: "Funny in Sweet Valley Show",
-    description: "Zabawny show dla małych i dużych, prowadzony przez charyzmatycznego bohatera.",
     venue: "Town Hall Theatre",
     officialUrl: "https://energylandia.pl/show/funny-in-sweet-valley-show/",
     mapUrl: "https://energylandia.pl/mapa-parku/?location=238",
-    imageUrl: "https://energylandia.pl/wp-content/uploads/2026/04/funny_in_sv.jpg",
-    zone: "sweet-valley",
     startMin: 1110,
     performanceStartMin: 1120,
     endMin: 1135,
     durationMinutes: 15,
-    durationLabel: "15 min",
     performanceTimes: ["18:30", "18:40", "19:15"],
     walkingMinutes: 6,
     sourceCheckedAt: "2026-07-14T08:30:00.000Z",
   });
+  assert.match(show.description, /oficjalny opis/i);
+  assert.equal(show.imageUrl, null);
   assert.equal(decoded.days[0].steps.length, 15);
   assert.equal(decoded.safety.valid, true);
+});
+
+test("v2 skraca plan z pokazem do formatu komunikatorów i nadal czyta dawny payload", () => {
+  const plan = planWithOfficialShow();
+  const compactPayload = encodePlan(plan);
+  const legacyPayload = Buffer.from(JSON.stringify(plan)).toString("base64url");
+
+  assert.ok(compactPayload.length < 1_200);
+  assert.ok(compactPayload.length < legacyPayload.length * 0.35);
+  assert.ok(decodePlan(legacyPayload));
+  assert.equal(decodePlan("eyJ2IjoyLCJwIjpbXX0"), null);
+
+  const forgedSnapshot = JSON.parse(Buffer.from(compactPayload, "base64url").toString("utf8"));
+  const firstRide = forgedSnapshot.d[0].find((step) => step[0] === "r");
+  firstRide[1] = "zadra"; // 140 cm: nie może przejść przez profil z dzieckiem 122 cm.
+  const forgedPayload = Buffer.from(JSON.stringify(forgedSnapshot)).toString("base64url");
+  assert.equal(decodePlan(forgedPayload), null);
 });
 
 test("pokaz jest odrzucany bez świadomego włączenia oraz dla obcych danych", () => {
