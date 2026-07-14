@@ -1,7 +1,39 @@
 const DEFAULT_MEMBER = Object.freeze({
-  adult: Object.freeze({ age: 35, height: 175 }),
+  adult: Object.freeze({ age: 18, height: 170 }),
   child: Object.freeze({ age: 6, height: 120 }),
 });
+
+// The planner stores the conservative lower edge of a selected range. That way
+// a plan is never more permissive than the person could safely be within the
+// range they chose at onboarding.
+export const HEIGHT_RANGE_OPTIONS = Object.freeze([
+  Object.freeze({ value: 50, label: "poniżej 80 cm" }),
+  Object.freeze({ value: 80, label: "80–99 cm" }),
+  Object.freeze({ value: 100, label: "100–109 cm" }),
+  Object.freeze({ value: 110, label: "110–119 cm" }),
+  Object.freeze({ value: 120, label: "120–129 cm" }),
+  Object.freeze({ value: 130, label: "130–139 cm" }),
+  Object.freeze({ value: 140, label: "140–149 cm" }),
+  Object.freeze({ value: 150, label: "150–159 cm" }),
+  Object.freeze({ value: 160, label: "160–169 cm" }),
+  Object.freeze({ value: 170, label: "170–179 cm" }),
+  Object.freeze({ value: 180, label: "180–189 cm" }),
+  Object.freeze({ value: 190, label: "190–195 cm" }),
+  Object.freeze({ value: 196, label: "196 cm lub więcej" }),
+]);
+
+export const CHILD_AGE_RANGE_OPTIONS = Object.freeze([
+  Object.freeze({ value: 0, label: "0–3 lata" }),
+  Object.freeze({ value: 4, label: "4–5 lat" }),
+  Object.freeze({ value: 6, label: "6–7 lat" }),
+  Object.freeze({ value: 8, label: "8–11 lat" }),
+  Object.freeze({ value: 12, label: "12–15 lat" }),
+  Object.freeze({ value: 16, label: "16–17 lat" }),
+]);
+
+export const ADULT_AGE_RANGE_OPTIONS = Object.freeze([
+  Object.freeze({ value: 18, label: "18 lat lub więcej" }),
+]);
 
 const INTERESTS = new Set(["coasters", "water", "family", "scenic"]);
 const INTENSITIES = new Set(["calm", "mixed", "thrill"]);
@@ -13,6 +45,29 @@ const MEAL_MODES = new Set(["fast", "sit-down", "own", "none"]);
 function finiteNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function rangeFor(value, options, { min = -Infinity, max = Infinity } = {}) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < min || number > max) return null;
+  return [...options].reverse().find((option) => number >= option.value) ?? null;
+}
+
+export function heightRangeFor(value) {
+  return rangeFor(value, HEIGHT_RANGE_OPTIONS, { min: 50, max: 230 });
+}
+
+export function ageRangeFor(role, value) {
+  const options = role === "adult" ? ADULT_AGE_RANGE_OPTIONS : CHILD_AGE_RANGE_OPTIONS;
+  return rangeFor(value, options, role === "adult" ? { min: 18, max: 110 } : { min: 0, max: 17 });
+}
+
+export function heightRangeLabel(value, fallback = "nie wybrano") {
+  return heightRangeFor(value)?.label ?? fallback;
+}
+
+export function ageRangeLabel(role, value, fallback = "nie wybrano") {
+  return ageRangeFor(role, value)?.label ?? fallback;
 }
 
 function validTime(value, fallback) {
@@ -52,17 +107,21 @@ export function normalizeDraftProfile(input, fallback) {
     const role = rawMember?.role === "child" ? "child" : "adult";
     const defaults = DEFAULT_MEMBER[role];
     const ordinal = rawMembers.slice(0, index + 1).filter((member) => (member?.role === "child" ? "child" : "adult") === role).length;
+    const rawAge = finiteNumber(rawMember?.age, defaults.age);
+    const rawHeight = finiteNumber(rawMember?.height, defaults.height);
+    const age = ageRangeFor(role, rawAge)?.value ?? rawAge;
+    const height = heightRangeFor(rawHeight)?.value ?? rawHeight;
     return {
       id: cleanId(rawMember?.id, `${role}-${ordinal}`, usedIds),
       role,
       name: String(rawMember?.name ?? `${role === "adult" ? "Dorosły" : "Dziecko"} ${ordinal}`).slice(0, 40),
-      age: finiteNumber(rawMember?.age, defaults.age),
-      height: finiteNumber(rawMember?.height, defaults.height),
+      age,
+      height,
     };
   });
 
   if (!members.some((member) => member.role === "adult")) {
-    members.unshift({ id: cleanId("adult-1", "adult-1", usedIds), role: "adult", name: "Dorosły 1", age: 35, height: 175 });
+    members.unshift({ id: cleanId("adult-1", "adult-1", usedIds), role: "adult", name: "Dorosły 1", age: 18, height: 170 });
   }
   members.splice(14);
 

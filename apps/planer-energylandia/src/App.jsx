@@ -51,14 +51,27 @@ import {
   sanitizeSharedPlan,
 } from "./share.js";
 import {
+  ADULT_AGE_RANGE_OPTIONS,
   approximateWalkingMinutes,
+  ageRangeFor,
+  ageRangeLabel,
+  CHILD_AGE_RANGE_OPTIONS,
   countPlanAttractions,
   distanceMeters,
   formatDistance,
+  HEIGHT_RANGE_OPTIONS,
+  heightRangeFor,
+  heightRangeLabel,
   normalizeDraftProfile,
   queueFreshness,
 } from "./appUtils.js";
-import { loadShowSchedule, OFFICIAL_SHOW_INDEX, showScheduleFreshness, showsOnDate } from "./shows.js";
+import {
+  geolocationFailureStatus,
+  positionFromCoordinates,
+  QUICK_LOCATION_OPTIONS,
+  TRACKING_LOCATION_OPTIONS,
+} from "./location.js";
+import { loadShowSchedule, OFFICIAL_SHOW_INDEX, showDateAvailability, showScheduleFreshness } from "./shows.js";
 import { loadAntistormNowcast, loadWeather, formatPolishDay } from "./weather.js";
 import { assessThreeDayWeather } from "./weatherPlan.js";
 import { RainSafetyCard, WeatherStart } from "./WeatherStart.jsx";
@@ -81,14 +94,16 @@ const STEP_ILLUSTRATIONS = [
 
 const DEFAULT_PROFILE = Object.freeze({
   dayCount: 1,
-  visitStartDate: null,
+  // A direct „Ułóż plan” path needs a real calendar day as well: otherwise
+  // the optional official show timetable cannot match the generated day.
+  visitStartDate: warsawDateKey(),
   arrivalTime: "10:00",
   departureTime: "20:00",
   pace: "normal",
   splitPolicy: "worthwhile",
   members: [
-    { id: "adult-1", role: "adult", name: "Dorosły 1", age: 35, height: 175 },
-    { id: "adult-2", role: "adult", name: "Dorosły 2", age: 35, height: 175 },
+    { id: "adult-1", role: "adult", name: "Dorosły 1", age: 18, height: 170 },
+    { id: "adult-2", role: "adult", name: "Dorosły 2", age: 18, height: 170 },
     { id: "child-1", role: "child", name: "Dziecko 1", age: 6, height: 120 },
     { id: "child-2", role: "child", name: "Dziecko 2", age: 6, height: 120 },
   ],
@@ -121,7 +136,7 @@ function writeStored(key, value) {
 
 function defaultMember(role, index) {
   return role === "adult"
-    ? { id: `adult-${index + 1}`, role, name: `Dorosły ${index + 1}`, age: 35, height: 175 }
+    ? { id: `adult-${index + 1}`, role, name: `Dorosły ${index + 1}`, age: 18, height: 170 }
     : { id: `child-${index + 1}`, role, name: `Dziecko ${index + 1}`, age: 6, height: 120 };
 }
 
@@ -139,6 +154,43 @@ function resizeMembers(members, role, requestedCount) {
 
 function memberLabel(member) {
   return member?.name?.trim() || (member?.role === "adult" ? "Dorosły" : "Dziecko");
+}
+
+function MemberRangeFields({ member, updateMember, agesValid, heightsValid }) {
+  const ageRange = ageRangeFor(member.role, member.age);
+  const heightRange = heightRangeFor(member.height);
+  const ageOptions = member.role === "adult" ? ADULT_AGE_RANGE_OPTIONS : CHILD_AGE_RANGE_OPTIONS;
+
+  return (
+    <div className="range-field-grid">
+      <label>
+        <span>Wiek</span>
+        <select
+          aria-label={`${memberLabel(member)}: przedział wieku`}
+          aria-invalid={!ageRange}
+          aria-describedby={!agesValid ? "age-validation-error" : undefined}
+          value={ageRange?.value ?? ""}
+          onChange={(event) => updateMember(member.id, "age", Number(event.target.value))}
+        >
+          {!ageRange && <option value="" disabled>Wybierz przedział</option>}
+          {ageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Wzrost</span>
+        <select
+          aria-label={`${memberLabel(member)}: przedział wzrostu`}
+          aria-invalid={!heightRange}
+          aria-describedby={!heightsValid ? "height-validation-error" : undefined}
+          value={heightRange?.value ?? ""}
+          onChange={(event) => updateMember(member.id, "height", Number(event.target.value))}
+        >
+          {!heightRange && <option value="" disabled>Wybierz przedział</option>}
+          {HEIGHT_RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+    </div>
+  );
 }
 
 function offsetDateKey(dateKey, offset) {
@@ -183,30 +235,87 @@ function useUserLocation() {
   const [position, setPosition] = useState(null);
   const [status, setStatus] = useState("idle");
   const watchRef = useRef(null);
+  const positionRef = useRef(null);
+  const requestRef = useRef(0);
+
+  const clearTracking = useCallback(() => {
+    if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+    watchRef.current = null;
+  }, []);
+
+  const acceptPosition = useCallback((coords) => {
+    const nextPosition = positionFromCoordinates(coords);
+    if (!nextPosition) return false;
+    positionRef.current = nextPosition;
+    setPosition(nextPosition);
+    setStatus("ready");
+    return true;
+  }, []);
+
+  const startTracking = useCallback((request) => {
+    if (!navigator.geolocation || request !== requestRef.current) return;
+    clearTracking();
+    watchRef.current = navigator.geolocation.watchPosition(
+      ({ coords }) => {
+        if (request !== requestRef.current) return;
+        acceptPosition(coords);
+      },
+      (error) => {
+        if (request !== requestRef.current) return;
+        clearTracking();
+        const failure = geolocationFailureStatus(error);
+        if (failure === "denied") {
+          positionRef.current = null;
+          setPosition(null);
+          setStatus("denied");
+          return;
+        }
+        // A previous fix is more useful than an empty plan while a high-
+        // accuracy watcher temporarily loses its signal in the park.
+        setStatus(positionRef.current ? "ready" : failure);
+      },
+      TRACKING_LOCATION_OPTIONS,
+    );
+  }, [acceptPosition, clearTracking]);
 
   const locate = useCallback(() => {
     if (!navigator.geolocation) {
+      positionRef.current = null;
       setPosition(null);
       setStatus("unsupported");
       return;
     }
-    if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
-    setPosition(null);
-    setStatus("loading");
-    watchRef.current = navigator.geolocation.watchPosition(
-      ({ coords }) => {
-        setPosition({ lat: coords.latitude, lon: coords.longitude, accuracy: coords.accuracy });
-        setStatus("ready");
-      },
-      (error) => {
-        setPosition(null);
-        if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current);
-        watchRef.current = null;
-        setStatus(error?.code === 1 ? "denied" : "error");
-      },
-      { enableHighAccuracy: true, maximumAge: 8_000, timeout: 15_000 },
-    );
-  }, []);
+    const request = requestRef.current + 1;
+    requestRef.current = request;
+    clearTracking();
+    setStatus(positionRef.current ? "refreshing" : "loading");
+    try {
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => {
+          if (request !== requestRef.current) return;
+          if (acceptPosition(coords)) startTracking(request);
+          else setStatus("error");
+        },
+        (error) => {
+          if (request !== requestRef.current) return;
+          const failure = geolocationFailureStatus(error);
+          if (failure === "denied") {
+            positionRef.current = null;
+            setPosition(null);
+            setStatus("denied");
+            return;
+          }
+          // The first quick fix can time out indoors or in an embedded iOS
+          // view. Try the longer GPS watcher before declaring a failure.
+          setStatus(positionRef.current ? "refreshing" : "loading");
+          startTracking(request);
+        },
+        QUICK_LOCATION_OPTIONS,
+      );
+    } catch {
+      setStatus("error");
+    }
+  }, [acceptPosition, clearTracking, startTracking]);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,13 +325,13 @@ function useUserLocation() {
       if (permission.state === "granted") {
         if (watchRef.current == null) locate();
       } else if (permission.state === "denied") {
-        if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
-        watchRef.current = null;
+        requestRef.current += 1;
+        clearTracking();
+        positionRef.current = null;
         setPosition(null);
         setStatus("denied");
       } else {
-        setPosition(null);
-        setStatus("idle");
+        if (!positionRef.current) setStatus("idle");
       }
     };
     navigator.permissions?.query?.({ name: "geolocation" }).then((result) => {
@@ -234,9 +343,10 @@ function useUserLocation() {
     return () => {
       cancelled = true;
       permission?.removeEventListener?.("change", syncPermission);
-      if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+      requestRef.current += 1;
+      clearTracking();
     };
-  }, [locate]);
+  }, [clearTracking, locate]);
 
   return { position, status, locate };
 }
@@ -453,22 +563,19 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
           <>
             <p className="eyebrow">BEZPIECZEŃSTWO PRZEDE WSZYSTKIM</p>
             <h1 ref={headingRef} tabIndex="-1">Wiek i wzrost każdej osoby</h1>
-            <p className="step-lead">Nie zgaduj w górę. Obsługa i pomiar przy wejściu zawsze mają ostatnie słowo.</p>
+            <p className="step-lead">Wybierz przedział, nie wpisuj liczb. Plan liczy dolną granicę zakresu; pomiar przy wejściu zawsze ma ostatnie słowo.</p>
             <WizardIllustration step={step} />
             <div className="member-stack">
               {profile.members.map((member, index) => (
                 <article className={`member-card ${member.role}`} key={member.id} role="group" aria-labelledby={`member-title-${member.id}`}>
                   <div className="member-card-title"><span>{index + 1}</span><strong id={`member-title-${member.id}`}>{member.role === "adult" ? "Dorosły" : "Dziecko / nastolatek"}</strong></div>
                   <label className="wide-field"><span>Imię lub skrót — opcjonalnie</span><input type="text" maxLength="40" aria-label={`${memberLabel(member)}: imię lub skrót`} value={member.name} onChange={(event) => updateMember(member.id, "name", event.target.value)} /></label>
-                  <div className="number-field-grid">
-                    <label><span>Wiek</span><div><input inputMode="numeric" type="number" min="0" max="110" aria-label={`${memberLabel(member)}: wiek`} aria-invalid={member.role === "adult" ? Number(member.age) < 18 || Number(member.age) > 110 : Number(member.age) < 0 || Number(member.age) > 17} aria-describedby={!agesValid ? "age-validation-error" : undefined} value={member.age} onChange={(event) => updateMember(member.id, "age", Number(event.target.value))} /><em>lat</em></div></label>
-                    <label><span>Wzrost</span><div><input inputMode="numeric" type="number" min="50" max="230" aria-label={`${memberLabel(member)}: wzrost`} aria-invalid={Number(member.height) < 50 || Number(member.height) > 230} aria-describedby={!heightsValid ? "height-validation-error" : undefined} value={member.height} onChange={(event) => updateMember(member.id, "height", Number(event.target.value))} /><em>cm</em></div></label>
-                  </div>
+                  <MemberRangeFields member={member} updateMember={updateMember} agesValid={agesValid} heightsValid={heightsValid} />
                 </article>
               ))}
             </div>
-            {!agesValid && <div className="warning-note" id="age-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Dorośli opiekunowie muszą mieć co najmniej 18 lat; w tej sekcji dzieci i nastolatki mają 0–17 lat.</span></div>}
-            {!heightsValid && <div className="warning-note" id="height-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Podaj rzeczywisty wzrost każdej osoby w zakresie 50–230 cm.</span></div>}
+            {!agesValid && <div className="warning-note" id="age-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Wybierz przedział wieku: opiekun ma co najmniej 18 lat, a dziecko lub nastolatek ma 0–17 lat.</span></div>}
+            {!heightsValid && <div className="warning-note" id="height-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Wybierz przedział wzrostu dla każdej osoby.</span></div>}
           </>
         )}
 
@@ -546,7 +653,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
             <WizardIllustration step={step} />
             <div className="review-card">
               <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.dayCount} {profile.dayCount === 1 ? "dzień" : "dni"}{profile.visitStartDate ? ` od ${formatPolishDay(profile.visitStartDate, true)}` : ""}</strong><small>{profile.arrivalTime}–{profile.departureTime} · tempo {profile.pace === "easy" ? "spokojne" : profile.pace === "fast" ? "szybkie" : "normalne"}</small></span></div>
-              <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)} ${member.height} cm`).join(" · ")}</small></span></div>
+              <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)}: ${ageRangeLabel(member.role, member.age)} · ${heightRangeLabel(member.height)}`).join(" · ")}</small></span></div>
               <div><Sparkle size={22} weight="duotone" /><span><strong>{profile.preferences.intensity === "thrill" ? "Mocny dzień" : profile.preferences.intensity === "calm" ? "Spokojny dzień" : "Po trochu"}</strong><small>kolejki do {profile.preferences.maxQueue} min · woda: {profile.preferences.wet === "avoid" ? "nie" : profile.preferences.wet === "want" ? "tak" : "może być"}</small></span></div>
               <div><ArrowsSplit size={22} weight="duotone" /><span><strong>{effectiveSplitPolicy === "never" ? "Zawsze razem" : effectiveSplitPolicy === "often" ? "Podział dozwolony" : "Jeden wartościowy podział"}</strong><small>{profile.meal.mode === "none" ? "bez zaplanowanego obiadu" : `obiad około ${profile.meal.time}`}</small></span></div>
               <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.entertainment?.includeShows ? "Sprawdź pokazy na żywo" : "Bez pokazów w trasie"}</strong><small>{profile.entertainment?.includeShows ? "Tylko świeży oficjalny terminarz i tylko bez skracania dnia." : "Możesz zmienić to w kroku „Apetyt”."}</small></span></div>
@@ -698,7 +805,7 @@ function PrintablePlan({ plan, planUrl, preview = false }) {
 
         <div className="pdf-party-panel">
           <figure><img src={`${import.meta.env.BASE_URL}assets/onboarding/02-sklad.jpg`} alt="Filcowa grupa uczestników" /></figure>
-          <section><p className="pdf-kicker">SKŁAD I OGRANICZENIA</p><h2>Każda osoba policzona osobno.</h2><ul>{plan.profile.members.map((member) => <li key={member.id}><strong>{memberLabel(member)}</strong><span>{member.age} lat · {member.height} cm</span></li>)}</ul></section>
+          <section><p className="pdf-kicker">SKŁAD I OGRANICZENIA</p><h2>Każda osoba policzona osobno.</h2><ul>{plan.profile.members.map((member) => <li key={member.id}><strong>{memberLabel(member)}</strong><span>{ageRangeLabel(member.role, member.age)} · {heightRangeLabel(member.height)}</span></li>)}</ul></section>
         </div>
 
         <aside className="pdf-live-note"><strong>Ten dokument jest mapą dnia, nie danymi na żywo.</strong><span>Kolejki, pogoda i alert Antistorm zmieniają się — przed kolejnym punktem otwórzcie żywy plan z linku na dole.</span></aside>
@@ -768,12 +875,27 @@ function PdfPreview({ plan, planUrl, onClose }) {
 
 function ShowSchedulePanel({ plan, day, selectedDay, schedule, status, onRefresh, onToggle }) {
   const includeShows = plan.profile?.entertainment?.includeShows === true;
-  const dateKey = offsetDateKey(plan.profile?.visitStartDate, selectedDay);
+  // Older saved plans did not persist a visit date. Keep their calendar useful
+  // by treating the selected tab as today rather than presenting a false
+  // "broken calendar" state.
+  const dateKey = offsetDateKey(plan.profile?.visitStartDate || warsawDateKey(), selectedDay);
   const freshness = showScheduleFreshness(schedule);
-  const availableShows = showsOnDate(schedule, dateKey);
+  const availability = showDateAvailability(schedule, dateKey);
+  const availableShows = availability.shows;
   const scheduledShow = day.steps.find((step) => step.kind === "show") ?? null;
   const sourceUrl = schedule?.source?.url || OFFICIAL_SHOW_INDEX;
   const refreshLabel = status === "loading" ? "Odświeżam…" : "Odśwież terminarz";
+  const selectedDateLabel = planDayDateLabel(plan, selectedDay, true) || (dateKey ? formatPolishDay(dateKey, true) : "wybrany dzień");
+  const rangeLabel = availability.range
+    ? `${formatPolishDay(availability.range.from, true)}–${formatPolishDay(availability.range.to, true)}`
+    : null;
+  const emptyCalendarCopy = availability.state === "outside-range"
+    ? `Oficjalna migawka obejmuje teraz ${rangeLabel}. Dla ${selectedDateLabel} Energylandia nie opublikowała jeszcze godzin — sprawdź oficjalną rozpiskę.`
+    : availability.state === "retained-stale"
+      ? `W tej dacie zostały tylko niepełne, starsze wpisy. Nie pokazujemy ich jako aktualnego kalendarza; sprawdź oficjalną rozpiskę.`
+      : availability.state === "no-events"
+        ? `Na ${selectedDateLabel} w aktualnej oficjalnej rozpisce nie ma dodatkowych pokazów.`
+        : `Nie udało się pobrać kompletnej rozpiski dla ${selectedDateLabel}. Sprawdź oficjalną stronę Energylandii.`;
 
   return (
     <section className="shows-section" aria-labelledby="shows-title">
@@ -787,14 +909,14 @@ function ShowSchedulePanel({ plan, day, selectedDay, schedule, status, onRefresh
         <p><strong>Oficjalny terminarz Energylandii</strong><small>{status === "loading" ? "Sprawdzam aktualną migawkę…" : freshness.state === "fresh" ? freshness.label : `${freshness.label} — nie wpisuję godzin automatycznie.`}</small></p>
         <button type="button" onClick={onRefresh} disabled={status === "loading"}><ArrowClockwise className={status === "loading" ? "spin" : ""} size={18} weight="bold" /> <span>{refreshLabel}</span></button>
       </div>
-      {!includeShows && <p className="shows-muted">Trasa zostaje tylko przy atrakcjach. Włącz „Dodaj”, jeśli chcecie, aby planer uważał także na terminy show.</p>}
-      {includeShows && freshness.state !== "fresh" && <p className="shows-warning"><WarningCircle size={18} weight="fill" /><span>Terminarz nie jest teraz wystarczająco świeży, więc nie udajemy pewnej godziny. <a href={sourceUrl} target="_blank" rel="noreferrer">Sprawdź oficjalną rozpiskę</a> i tablice w parku.</span></p>}
+      {!includeShows && <p className="shows-muted">Pokazy nie wejdą do trasy, ale kalendarz poniżej nadal możecie sprawdzić. Włącz „Dodaj”, jeśli planer ma pilnować terminów show.</p>}
+      {includeShows && freshness.state !== "fresh" && <p className="shows-warning"><WarningCircle size={18} weight="fill" /><span>Terminarz ma teraz status „{freshness.label}”, więc nie wpisujemy godzin automatycznie. Ostatnią opublikowaną rozpiskę nadal pokazujemy niżej — przed wyjściem sprawdź <a href={sourceUrl} target="_blank" rel="noreferrer">oficjalny terminarz</a> i tablice w parku.</span></p>}
       {includeShows && freshness.state === "fresh" && (
         <>
-          {scheduledShow ? <article className="scheduled-show"><div><span className="show-time">{formatPlanTime(scheduledShow.performanceStartMin)}</span><p><small>WPISANE W KOŃCOWY BUFOR • {scheduledShow.durationMinutes} MIN</small><strong>{scheduledShow.title}</strong><em>{scheduledShow.venue}</em></p></div><a href={scheduledShow.officialUrl} target="_blank" rel="noreferrer">Oficjalny opis <CaretRight size={17} /></a></article> : <p className="shows-muted">Na {planDayDateLabel(plan, selectedDay, true) || "wybrany dzień"} nie ma jeszcze pokazu, który zmieści się bez naruszania atrakcji, obiadu i godzinnego buforu wyjścia. Niczego nie wciskamy na siłę.</p>}
-          {availableShows.length > 0 ? <details className="show-list"><summary><span><strong>{availableShows.length} pokazów w oficjalnej rozpisce</strong><small>{planDayDateLabel(plan, selectedDay, true) || dateKey} · otwórz opisy, miejsca i godziny</small></span><CaretRight size={18} /></summary><div>{availableShows.map((show) => <article className="show-card" key={show.id}>{show.imageUrl && <img src={show.imageUrl} alt={`${show.title} — oficjalne zdjęcie Energylandii`} loading="lazy" />}<span><p><strong>{show.title}</strong><small>{show.venue} · {show.durationMinutes} min</small></p><p className="show-times">{show.times.join(" · ")}</p><p className="show-description">{show.description || "Oficjalny opis jest dostępny na stronie Energylandii."}</p><p className="show-links"><a href={show.url} target="_blank" rel="noreferrer">Opis Energylandii</a>{show.mapUrl && <a href={show.mapUrl} target="_blank" rel="noreferrer">Pokaż na mapie parku</a>}</p></span></article>)}</div></details> : <p className="shows-muted">Brak kompletnej rozpiski pokazów dla tego dnia w aktualnej oficjalnej migawce.</p>}
+          {scheduledShow ? <article className="scheduled-show"><div><span className="show-time">{formatPlanTime(scheduledShow.performanceStartMin)}</span><p><small>WPISANE W KOŃCOWY BUFOR • {scheduledShow.durationMinutes} MIN</small><strong>{scheduledShow.title}</strong><em>{scheduledShow.venue}</em></p></div><a href={scheduledShow.officialUrl} target="_blank" rel="noreferrer">Oficjalny opis <CaretRight size={17} /></a></article> : <p className="shows-muted">Na {selectedDateLabel} nie ma jeszcze pokazu, który zmieści się bez naruszania atrakcji, obiadu i godzinnego buforu wyjścia. Niczego nie wciskamy na siłę.</p>}
         </>
       )}
+      {availableShows.length > 0 ? <details className="show-list"><summary><span><strong>{availableShows.length} pokazów w oficjalnej rozpisce</strong><small>{selectedDateLabel} · otwórz opisy, miejsca i godziny</small></span><CaretRight size={18} /></summary><div>{availableShows.map((show) => <article className="show-card" key={show.id}>{show.imageUrl && <img src={show.imageUrl} alt={`${show.title} — oficjalne zdjęcie Energylandii`} loading="lazy" />}<span><p><strong>{show.title}</strong><small>{show.venue} · {show.durationMinutes} min</small></p><p className="show-times">{show.times.join(" · ")}</p><p className="show-description">{show.description || "Oficjalny opis jest dostępny na stronie Energylandii."}</p><p className="show-links"><a href={show.url} target="_blank" rel="noreferrer">Opis Energylandii</a>{show.mapUrl && <a href={show.mapUrl} target="_blank" rel="noreferrer">Pokaż na mapie parku</a>}</p></span></article>)}</div></details> : <p className="shows-muted">{emptyCalendarCopy} <a href={sourceUrl} target="_blank" rel="noreferrer">Otwórz terminarz Energylandii.</a></p>}
       <p className="shows-note">{schedule?.source?.note || "Godziny mogą zmienić się operacyjnie — przed pokazem sprawdź również tablice na miejscu."}</p>
     </section>
   );
@@ -827,6 +949,13 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
   const nextAttractionId = dayAttractionIds.find((id) => !completedIds.includes(id));
   const firstRide = ALL_ATTRACTIONS_BY_ID[nextAttractionId];
   const firstRideDistance = firstRide ? distanceCopy(position, firstRide) : null;
+  const isLocating = locationStatus === "loading" || locationStatus === "refreshing";
+  const locationAccuracy = Number.isFinite(position?.accuracy) ? Math.round(position.accuracy) : null;
+  const locationButtonLabel = isLocating
+    ? (locationStatus === "refreshing" ? "Odświeżam GPS…" : "Ustalam GPS…")
+    : locationStatus === "ready" ? "Odśwież GPS"
+      : locationStatus === "timeout" || locationStatus === "error" ? "Spróbuj GPS ponownie"
+        : "Włącz GPS";
   const completedToday = dayAttractionIds.filter((id) => completedIds.includes(id)).length;
   const queueSnapshot = queueFreshness(plan.queueSnapshotAt);
   const selectedAttraction = selectedId ? ALL_ATTRACTIONS_BY_ID[selectedId] : null;
@@ -896,16 +1025,22 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
           <p>DZIEŃ {day.day ?? selectedDay + 1} Z {plan.days.length} • {plan.profile.members.length} OSÓB</p>
           <h2>{firstRide ? <>{completedToday > 0 ? "Teraz czas na" : "Zacznijcie od"}<br /><em>{firstRide.name}</em></> : `Dzień ${day.day ?? selectedDay + 1} zaliczony`}</h2>
           <span>{firstRide ? "Najpierw bezpieczeństwo, potem zgodność z waszym apetytem, kolejki i logiczny marsz." : "Wszystkie atrakcje zaplanowane na ten dzień są już oznaczone jako zaliczone."}</span>
-          {firstRideDistance && <small className="hero-distance"><Footprints size={16} weight="duotone" /> {firstRideDistance}</small>}
+          {firstRideDistance && <small className="hero-distance"><Footprints size={16} weight="duotone" /> <strong>Od was:</strong> {firstRideDistance}</small>}
+          {firstRide && !firstRideDistance && locationStatus !== "denied" && locationStatus !== "unsupported" && <button className="hero-location-button" type="button" onClick={locate} disabled={isLocating}><Crosshair size={18} weight="bold" /><span><strong>{isLocating ? "Szukam waszej pozycji…" : locationStatus === "timeout" || locationStatus === "error" ? "Spróbuj ustalić pozycję" : "Włącz lokalizację"}</strong><small>{isLocating ? "Za chwilę pokażę metry do każdej atrakcji." : "Pokażę metry i czas dojścia do każdej atrakcji."}</small></span></button>}
           {firstRide && <button className="hero-next-button" type="button" aria-haspopup="dialog" onClick={() => setSelectedId(firstRide.id)}>Opis i prowadzenie <CaretRight size={18} /></button>}
         </section>
         <nav className="day-tabs" aria-label="Dni planu">{plan.days.map((item, index) => { const dateLabel = planDayDateLabel(plan, index, true); return <button key={item.day} type="button" className={selectedDay === index ? "selected" : ""} aria-pressed={selectedDay === index} aria-current={selectedDay === index ? "step" : undefined} onClick={() => { setSelectedDay(index); setNotice(`Pokazuję dzień ${item.day}`); }}>Dzień {item.day}<small>{dateLabel ? `${dateLabel} · ` : ""}{item.stats.attractions} atrakcji</small></button>; })}</nav>
 
         <section className="plan-map-card" aria-labelledby="map-title">
-          <div className="section-heading"><div><p className="eyebrow">TRASA NA DZISIAJ</p><h2 id="map-title">Mapa dnia</h2></div><div className="map-controls"><button type="button" className={`location-control ${locationStatus === "ready" ? "active" : ""}`} onClick={locate}><Crosshair size={18} weight="bold" /> {locationStatus === "loading" ? "Szukam…" : locationStatus === "ready" ? "GPS" : "Odległości"}</button><button type="button" className={showToilets ? "active" : ""} aria-pressed={showToilets} onClick={() => setShowToilets((value) => !value)}><Toilet size={18} weight="fill" /> WC</button></div></div>
+          <div className="section-heading"><div><p className="eyebrow">TRASA NA DZISIAJ</p><h2 id="map-title">Mapa dnia</h2></div><div className="map-controls"><button type="button" className={`location-control ${position ? "active" : ""}`} onClick={locate} disabled={isLocating} aria-label={`${locationButtonLabel}. Pokaż odległości od aktualnej pozycji.`}><Crosshair size={18} weight="bold" /> {locationButtonLabel}</button><button type="button" className={showToilets ? "active" : ""} aria-pressed={showToilets} onClick={() => setShowToilets((value) => !value)}><Toilet size={18} weight="fill" /> WC</button></div></div>
           <PlannerMap items={mapItems} toilets={TOILETS} completedIds={completedIds} selectedId={selectedId} position={position} showToilets={showToilets} onSelect={(ride) => setSelectedId(ride.id)} />
-          {locationStatus === "idle" && <p className="location-message">Włącz „Odległości”, aby zobaczyć metry i orientacyjny czas dojścia przy każdej atrakcji.</p>}
-          {(locationStatus === "denied" || locationStatus === "error" || locationStatus === "unsupported") && <p className="location-message warning" role="status">Nie mam dostępu do pozycji telefonu. Włącz lokalizację dla tej strony w ustawieniach przeglądarki.</p>}
+          {locationStatus === "idle" && <p className="location-message">Włącz GPS, aby zobaczyć w planie metry i orientacyjny czas dojścia od was do każdej atrakcji.</p>}
+          {isLocating && <p className="location-message" role="status">Ustalam pozycję telefonu. Gdy ją złapię, odległości pojawią się przy każdej atrakcji.</p>}
+          {locationStatus === "ready" && <p className="location-message location-ready" role="status"><Crosshair size={15} weight="fill" /> GPS włączony — odległości w planie są liczone od waszej aktualnej pozycji{locationAccuracy ? ` (dokł. około ±${locationAccuracy} m)` : ""}.</p>}
+          {locationStatus === "timeout" && <p className="location-message warning" role="status">Nie udało się szybko ustalić pozycji. Przejdź bliżej otwartej przestrzeni i <button type="button" onClick={locate}>spróbuj GPS ponownie</button>.</p>}
+          {locationStatus === "error" && <p className="location-message warning" role="status">Nie udało się odczytać pozycji telefonu. <button type="button" onClick={locate}>Spróbuj GPS ponownie</button>.</p>}
+          {locationStatus === "denied" && <p className="location-message warning" role="status">Lokalizacja jest zablokowana. Włącz ją dla tej strony w ustawieniach przeglądarki, aby zobaczyć metry w planie.</p>}
+          {locationStatus === "unsupported" && <p className="location-message warning" role="status">Ta przeglądarka nie udostępnia lokalizacji, więc nie pokażemy uczciwych odległości od was.</p>}
           <div className="day-stats"><span><Clock size={16} /> {day.stats.start}–{day.stats.end}</span><span><MapTrifold size={16} /> ~{day.stats.walkingMinutes} min marszu</span><span><CheckCircle size={16} /> {completedToday}/{dayAttractionIds.length}</span></div>
           <p className="queue-snapshot">Kolejki: {queueSnapshot.label}{queueSnapshot.state === "stale" ? " — traktuj jako orientacyjne" : ""}.</p>
         </section>
@@ -923,9 +1058,9 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
                 const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId];
                 const completed = completedIds.includes(ride.id);
                 const liveDistance = distanceCopy(position, ride);
-                return <article className={`timeline-ride ${completed ? "completed" : ""}`} key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><button className="ride-content" type="button" onClick={() => setSelectedId(ride.id)}><span className="route-number">{step.sequence}</span><span><em>WSZYSCY • {zoneLabel(ride.zone)}</em><h3>{ride.name}</h3><p>{attractionLabel(ride)}{Number.isFinite(step.queueMinutes) ? ` · kolejka ${step.queueMinutes} min` : ""}</p>{liveDistance && <small className="distance-meta"><Footprints size={13} weight="duotone" /> {liveDistance}</small>}</span><CaretRight size={18} /></button><button className="complete-button" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={24} weight={completed ? "fill" : "regular"} /></button></article>;
+                return <article className={`timeline-ride ${completed ? "completed" : ""}`} key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><button className="ride-content" type="button" onClick={() => setSelectedId(ride.id)}><span className="route-number">{step.sequence}</span><span><em>WSZYSCY • {zoneLabel(ride.zone)}</em><h3>{ride.name}</h3><p>{attractionLabel(ride)}{Number.isFinite(step.queueMinutes) ? ` · kolejka ${step.queueMinutes} min` : ""}</p>{liveDistance && <small className="distance-meta" aria-label={`Odległość od was: ${liveDistance}`}><Footprints size={13} weight="duotone" /> <span>OD WAS</span> · {liveDistance}</small>}</span><CaretRight size={18} /></button><button className="complete-button" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={24} weight={completed ? "fill" : "regular"} /></button></article>;
               }
-              return <article className="timeline-split" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="split-heading"><span className="route-number">{step.sequence}</span><div><em>PODZIAŁ GRUPY</em><h3>Dwie dobre trasy obok siebie</h3></div></div><div className="split-assignments">{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const completed = completedIds.includes(ride.id); const liveDistance = distanceCopy(position, ride); return <div className={completed ? "completed" : ""} key={assignment.attractionId}><button className="split-detail" type="button" onClick={() => setSelectedId(ride.id)}><span>{step.sequence}{index === 0 ? "A" : "B"}</span><div><em>{assignment.label}</em><strong>{ride.name}</strong><small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(" · ")}</small>{liveDistance && <small className="distance-meta"><Footprints size={13} weight="duotone" /> {liveDistance}</small>}</div><CaretRight size={17} /></button><button className="split-complete" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={22} weight={completed ? "fill" : "regular"} /></button></div>; })}</div><p className="reunion"><MapPin size={16} weight="fill" /><span><strong>{step.reunion.time}</strong> · {step.reunion.label}</span></p></article>;
+              return <article className="timeline-split" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="split-heading"><span className="route-number">{step.sequence}</span><div><em>PODZIAŁ GRUPY</em><h3>Dwie dobre trasy obok siebie</h3></div></div><div className="split-assignments">{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const completed = completedIds.includes(ride.id); const liveDistance = distanceCopy(position, ride); return <div className={completed ? "completed" : ""} key={assignment.attractionId}><button className="split-detail" type="button" onClick={() => setSelectedId(ride.id)}><span>{step.sequence}{index === 0 ? "A" : "B"}</span><div><em>{assignment.label}</em><strong>{ride.name}</strong><small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(" · ")}</small>{liveDistance && <small className="distance-meta" aria-label={`Odległość od was: ${liveDistance}`}><Footprints size={13} weight="duotone" /> <span>OD WAS</span> · {liveDistance}</small>}</div><CaretRight size={17} /></button><button className="split-complete" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={22} weight={completed ? "fill" : "regular"} /></button></div>; })}</div><p className="reunion"><MapPin size={16} weight="fill" /><span><strong>{step.reunion.time}</strong> · {step.reunion.label}</span></p></article>;
             })}
           </div>
         </section>
@@ -1084,7 +1219,7 @@ export function App() {
   }, [buildPlanForProfile, profile, queues]);
 
   const prepareFreshPlan = ({ dayCount = 1, startDate = null } = {}, backScreen = "entry") => {
-    const freshProfile = normalizeDraftProfile({ ...DEFAULT_PROFILE, dayCount, visitStartDate: startDate }, DEFAULT_PROFILE);
+    const freshProfile = normalizeDraftProfile({ ...DEFAULT_PROFILE, dayCount, visitStartDate: startDate || DEFAULT_PROFILE.visitStartDate }, DEFAULT_PROFILE);
     setGenerationError("");
     setProfile(freshProfile);
     setStep(0);

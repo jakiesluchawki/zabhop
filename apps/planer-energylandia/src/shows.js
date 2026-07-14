@@ -1,4 +1,12 @@
 const OFFICIAL_SHOW_INDEX = "https://energylandia.pl/show/";
+// GitHub Pages republishes the official snapshot on a best-effort schedule. In
+// practice GitHub may coalesce cron runs, so a 90-minute window made a healthy
+// official snapshot disappear for most of the day. Four hours still keeps an
+// automatic itinerary conservative, while matching the real publishing
+// cadence. Older data remains useful as a clearly labelled calendar, never as
+// an invented plan entry.
+const FRESH_FOR_PLANNING_MINUTES = 4 * 60;
+const AGING_SCHEDULE_MINUTES = 12 * 60;
 
 function validTime(value) {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(value || ""));
@@ -6,6 +14,18 @@ function validTime(value) {
 
 function validDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
+}
+
+function rangeFromSchedule(data) {
+  const declared = data?.source?.scheduleRange;
+  if (validDateKey(declared?.from) && validDateKey(declared?.to) && declared.from <= declared.to) {
+    return { from: declared.from, to: declared.to };
+  }
+  const dates = (Array.isArray(data?.shows) ? data.shows : [])
+    .flatMap((show) => Array.isArray(show?.schedule) ? show.schedule.map((slot) => slot?.date) : [])
+    .filter(validDateKey)
+    .sort();
+  return dates.length ? { from: dates[0], to: dates.at(-1) } : null;
 }
 
 function officialUrl(value, path = "/") {
@@ -75,19 +95,40 @@ export function showScheduleFreshness(data, now = Date.now()) {
   const checkedAt = Date.parse(data?.source?.checkedAt || "");
   if (!Number.isFinite(checkedAt)) return { state: "unknown", label: "brak czasu sprawdzenia" };
   const minutes = Math.max(0, Math.round((now - checkedAt) / 60_000));
-  if (data?.source?.status === "fresh" && minutes <= 90) return { state: "fresh", label: minutes < 2 ? "sprawdzone przed chwilą" : `sprawdzone ${minutes} min temu` };
-  if (minutes <= 180) return { state: "aging", label: `sprawdzone ${minutes} min temu` };
+  if (data?.source?.status === "fresh" && minutes <= FRESH_FOR_PLANNING_MINUTES) {
+    return { state: "fresh", label: minutes < 2 ? "sprawdzone przed chwilą" : `sprawdzone ${minutes} min temu` };
+  }
+  if (minutes <= AGING_SCHEDULE_MINUTES) return { state: "aging", label: `sprawdzone ${minutes} min temu` };
   return { state: "stale", label: minutes < 120 ? `sprawdzone ${minutes} min temu` : `sprawdzone ${Math.round(minutes / 60)} godz. temu` };
 }
 
-export function showsOnDate(data, dateKey, { schedulableOnly = false } = {}) {
+export function showsOnDate(data, dateKey, { schedulableOnly = false, includeRetainedStale = false } = {}) {
   if (!validDateKey(dateKey)) return [];
-  return (data?.shows || [])
-    .filter((show) => !show.stale && (!schedulableOnly || show.completeForScheduling))
+  return (Array.isArray(data?.shows) ? data.shows : [])
+    .filter((show) => (includeRetainedStale || !show.stale) && (!schedulableOnly || show.completeForScheduling))
     .flatMap((show) => (show.schedule || [])
       .filter((slot) => slot.date === dateKey)
       .map((slot) => ({ ...show, times: slot.times, date: slot.date, scheduleLabel: slot.label })))
     .sort((a, b) => a.title.localeCompare(b.title, "pl"));
 }
 
-export { OFFICIAL_SHOW_INDEX };
+/**
+ * Keeps the UI honest when a group chooses a date which is outside the short
+ * range published by Energylandia. An absent list is no longer indistinguish-
+ * able from a broken calendar request.
+ */
+export function showDateAvailability(data, dateKey) {
+  const range = rangeFromSchedule(data);
+  if (!validDateKey(dateKey)) return { state: "invalid-date", shows: [], range };
+
+  const shows = showsOnDate(data, dateKey);
+  if (shows.length) return { state: "available", shows, range };
+
+  const retainedOnly = showsOnDate(data, dateKey, { includeRetainedStale: true });
+  if (retainedOnly.length) return { state: "retained-stale", shows: [], range };
+  if (!range) return { state: "unavailable", shows: [], range: null };
+  if (dateKey < range.from || dateKey > range.to) return { state: "outside-range", shows: [], range };
+  return { state: "no-events", shows: [], range };
+}
+
+export { AGING_SCHEDULE_MINUTES, FRESH_FOR_PLANNING_MINUTES, OFFICIAL_SHOW_INDEX };
