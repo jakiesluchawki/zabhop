@@ -1,0 +1,15 @@
+{
+  "name": "energylandia-shortlinks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import ./tests/setup.mjs --test",
+    "check": "npm run test",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

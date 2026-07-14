@@ -81,6 +81,7 @@ jobs:
             --exclude .git \
             --exclude .github \
             --exclude apps \
+            --exclude services \
             --exclude _site \
             ./ _site/
           rsync -a --delete apps/pogoda-energylandia/dist/ _site/pogoda-energylandia/

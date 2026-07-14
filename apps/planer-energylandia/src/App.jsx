@@ -45,10 +45,15 @@ import { PlannerMap } from "./PlannerMap.jsx";
 import { loadQueueTimes, queueForAttraction } from "./queues.js";
 import { overlayShowsOnPlan } from "./showPlanner.js";
 import {
+  createShortPlanLink,
+  createShortPlanUrl,
   createEmailDraftUrl,
   createPlanUrl,
+  hasShortPlanHash,
+  loadShortPlan,
   planFromHash,
   sanitizeSharedPlan,
+  shortPlanTokenFromHash,
 } from "./share.js";
 import {
   ADULT_AGE_RANGE_OPTIONS,
@@ -922,7 +927,41 @@ function ShowSchedulePanel({ plan, day, selectedDay, schedule, status, onRefresh
   );
 }
 
-function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus, onRefreshWeather, showSchedule, showStatus, onRefreshShows, onToggleShows }) {
+function SharedPlanStatus({ status, error, onRetry, onStart }) {
+  const headingRef = useRef(null);
+  const loading = status === "loading";
+
+  useLayoutEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
+  }, [status]);
+
+  return (
+    <main className="welcome-shell screen-app">
+      <article className="welcome-material">
+        <header>
+          <strong>UDOSTĘPNIONY PLAN</strong>
+          <button className="welcome-weather-link" type="button" onClick={onStart}><ArrowLeft size={15} weight="bold" /> Do początku</button>
+        </header>
+        <section aria-live="polite">
+          <p className="eyebrow">KRÓTKI LINK • POGODAPARK</p>
+          <h1 ref={headingRef} tabIndex="-1">{loading ? <>Otwieram <i>wasz plan.</i></> : <>Nie mogę otworzyć <i>tego planu.</i></>}</h1>
+          <p>{loading
+            ? "Pobieram bezpiecznie zapisany plan. Za chwilę zobaczycie trasę, pogodę i kolejki."
+            : error || "Krótki link jest niepełny albo plan nie jest już dostępny."}</p>
+        </section>
+        <footer>
+          {loading
+            ? <span className="resume-button" role="status">Łączę z planem…</span>
+            : <button className="primary-button" type="button" onClick={onRetry}><ArrowClockwise size={20} weight="bold" /> Spróbuj ponownie</button>}
+          {!loading && <button className="resume-button" type="button" onClick={onStart}>Ułóż nowy plan</button>}
+          <small>{loading ? "Krótki link nie zawiera danych w adresie komunikatora." : "Jeśli link dostałeś w wiadomości, poproś nadawcę o skopiowanie go jeszcze raz."}</small>
+        </footer>
+      </article>
+    </main>
+  );
+}
+
+function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weatherAssessment, weatherStatus, onRefreshWeather, showSchedule, showStatus, onRefreshShows, onToggleShows }) {
   const planHeadingRef = useRef(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
@@ -937,10 +976,17 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
   const [notice, setNotice] = useState("");
   const [reanalyzing, setReanalyzing] = useState(false);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [shortPlanUrl, setShortPlanUrl] = useState(initialShortPlanUrl);
+  const [shortLinkStatus, setShortLinkStatus] = useState(initialShortPlanUrl ? "ready" : "idle");
+  const [shortLinkError, setShortLinkError] = useState("");
+  const [showLocalFallback, setShowLocalFallback] = useState(false);
   const shareUrlRef = useRef(null);
+  const shortLinkPromiseRef = useRef(null);
   const day = annotatedDay(plan.days[selectedDay] ?? plan.days[0] ?? { steps: [], stats: {} });
   const mapItems = planMapItems(day);
-  const planUrl = useMemo(() => createPlanUrl(plan), [plan]);
+  const compactPlanUrl = useMemo(() => createPlanUrl(plan), [plan]);
+  const planUrl = shortPlanUrl || compactPlanUrl;
+  const compactPlanUrlRef = useRef(compactPlanUrl);
   const dayAttractionIds = day.steps.flatMap((step) => {
     if (step.kind === "ride") return [step.attractionId];
     if (step.kind === "split") return step.assignments.map((assignment) => assignment.attractionId);
@@ -972,6 +1018,23 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
   useEffect(() => writeStored(completedKey, completedIds), [completedIds, completedKey]);
   useEffect(() => { if (notice) { const timeout = window.setTimeout(() => setNotice(""), 2400); return () => window.clearTimeout(timeout); } return undefined; }, [notice]);
   useEffect(() => setSelectedId(null), [selectedDay]);
+  useEffect(() => {
+    if (!showLocalFallback) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      shareUrlRef.current?.focus();
+      shareUrlRef.current?.select();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showLocalFallback]);
+  useEffect(() => {
+    if (compactPlanUrlRef.current === compactPlanUrl) return;
+    compactPlanUrlRef.current = compactPlanUrl;
+    shortLinkPromiseRef.current = null;
+    setShortPlanUrl("");
+    setShortLinkStatus("idle");
+    setShortLinkError("");
+    setShowLocalFallback(false);
+  }, [compactPlanUrl]);
 
   const toggleCompleted = (id) => {
     const attraction = ALL_ATTRACTIONS_BY_ID[id];
@@ -990,29 +1053,68 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
       setReanalyzing(false);
     }
   };
+  const ensureShortPlanUrl = useCallback(async () => {
+    if (shortPlanUrl) return shortPlanUrl;
+    if (shortLinkPromiseRef.current) return shortLinkPromiseRef.current;
+    setShortLinkStatus("loading");
+    setShortLinkError("");
+    const task = createShortPlanLink(plan)
+      .then((url) => {
+        setShortPlanUrl(url);
+        setShortLinkStatus("ready");
+        setShowLocalFallback(false);
+        return url;
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "Nie udało się utworzyć krótkiego linku.";
+        setShortLinkStatus("error");
+        setShortLinkError(message);
+        throw error;
+      })
+      .finally(() => { shortLinkPromiseRef.current = null; });
+    shortLinkPromiseRef.current = task;
+    return task;
+  }, [plan, shortPlanUrl]);
   const share = async () => {
     try {
+      const url = await ensureShortPlanUrl();
       if (navigator.share) {
-        await navigator.share({ url: planUrl });
+        await navigator.share({ url });
         return;
       }
-      await navigator.clipboard.writeText(planUrl);
-      setNotice("Link skopiowany");
+      await navigator.clipboard.writeText(url);
+      setNotice("Krótki link skopiowany");
     } catch (error) {
       if (error?.name !== "AbortError") setNotice("Nie udało się otworzyć udostępniania");
     }
   };
   const copy = async () => {
-    try { await navigator.clipboard.writeText(planUrl); setNotice("Link skopiowany"); } catch {
-      shareUrlRef.current?.focus();
-      shareUrlRef.current?.select();
-      setNotice("Link zaznaczony — wybierz Kopiuj");
+    try {
+      const url = await ensureShortPlanUrl();
+      await navigator.clipboard.writeText(url);
+      setNotice("Krótki link skopiowany");
+    } catch {
+      setNotice("Nie udało się utworzyć krótkiego linku");
     }
   };
-  const openEmail = (event) => {
+  const copyLocalFallback = async () => {
+    try {
+      await navigator.clipboard.writeText(compactPlanUrl);
+      setNotice("Skopiowano lokalny, długi link");
+    } catch {
+      setShowLocalFallback(true);
+      setNotice("Lokalny link zaznaczony — wybierz Kopiuj");
+    }
+  };
+  const openEmail = async (event) => {
     event.preventDefault();
     if (!email || !event.currentTarget.reportValidity()) return;
-    window.location.href = createEmailDraftUrl(email, planUrl, plan);
+    try {
+      const url = await ensureShortPlanUrl();
+      window.location.href = createEmailDraftUrl(email, url, plan);
+    } catch {
+      setNotice("Nie udało się utworzyć krótkiego linku do e-maila");
+    }
   };
 
   return (
@@ -1066,10 +1168,17 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
         </section>
 
         <section className="export-section" aria-labelledby="export-title">
-          <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>Link nie zawiera imion ani bieżącej lokalizacji, ale zachowuje wiek, wzrost i role potrzebne do sprawdzenia bezpieczeństwa. Stan „zaliczone” zostaje tylko na tym telefonie.</p>
-          <div className="export-actions"><button type="button" onClick={share}><ShareNetwork size={21} weight="bold" /> Udostępnij plan</button><button type="button" onClick={copy}><Copy size={21} weight="bold" /> Kopiuj link</button><button type="button" onClick={() => setShowPdfPreview(true)}><Printer size={21} weight="bold" /> Przygotuj piękny PDF</button></div>
+          <p className="eyebrow">ZABIERZ PLAN ZE SOBĄ</p><h2 id="export-title">Jeden plan dla całej grupy</h2><p>W krótkim linku nie ma imion ani bieżącej lokalizacji. Anonimowy plan z rolą, wiekiem i wzrostem jest przechowywany maksymalnie 90 dni, żeby dało się go otworzyć w komunikatorze. Stan „zaliczone” zostaje tylko na tym telefonie.</p>
+          <div className="export-actions"><button type="button" onClick={share} disabled={shortLinkStatus === "loading"}><ShareNetwork size={21} weight="bold" /> {shortLinkStatus === "loading" ? "Tworzę link…" : "Udostępnij plan"}</button><button type="button" onClick={copy} disabled={shortLinkStatus === "loading"}><Copy size={21} weight="bold" /> {shortLinkStatus === "loading" ? "Tworzę link…" : "Kopiuj link"}</button><button type="button" onClick={() => setShowPdfPreview(true)}><Printer size={21} weight="bold" /> Przygotuj piękny PDF</button></div>
+          {shortLinkStatus === "loading" && <p className="data-status" role="status"><span />Tworzę krótki, klikalny link do tego planu…</p>}
+          {shortLinkStatus === "ready" && <p className="data-status" role="status"><span className="ready" />Krótki link jest gotowy — działa w WhatsAppie i Signalu.</p>}
+          {shortLinkStatus === "error" && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span><strong>Krótki link nie powstał.</strong> {shortLinkError} <button type="button" onClick={copy}>Spróbuj ponownie</button> albo <button type="button" onClick={copyLocalFallback}>skopiuj lokalny, długi link</button>.</span></div>}
           <form className="email-box" onSubmit={openEmail}><label><span>Adres e-mail</span><input type="email" required placeholder="np. rodzina@example.com" value={email} onChange={(event) => setEmail(event.target.value)} /></label><button type="submit"><EnvelopeSimple size={20} weight="bold" /> Otwórz szkic e-maila</button><small>Nie wysyłamy ani nie zapisujemy adresu. Szkic pocztowy zawiera pełną rozpiskę i wpisane nazwy uczestników; PDF możesz zapisać powyżej i dołączyć samodzielnie.</small></form>
-          <input ref={shareUrlRef} className="share-url" readOnly value={planUrl} aria-label="Link do planu" />
+          {shortPlanUrl
+            ? <input ref={shareUrlRef} className="share-url" readOnly value={shortPlanUrl} aria-label="Krótki link do planu" />
+            : showLocalFallback
+              ? <input ref={shareUrlRef} className="share-url" readOnly value={compactPlanUrl} aria-label="Lokalny, długi link do planu" />
+              : shortLinkStatus === "idle" && <p className="data-status"><span />Kliknij „Kopiuj link”, aby stworzyć krótki adres do komunikatora.</p>}
         </section>
         <footer className="app-footer">Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji i pokazów, OpenStreetMap oraz Queue-Times.</footer>
         {notice && <div className="toast" role="status">{notice}</div>}
@@ -1081,16 +1190,23 @@ function PlanView({ plan, onEdit, onReanalyze, weatherAssessment, weatherStatus,
 }
 
 export function App() {
-  const sharedHashPresent = useMemo(() => /(?:^|[#&])plan=/.test(window.location.hash), []);
-  const sharedPlan = useMemo(() => {
+  const initialHash = useMemo(() => window.location.hash, []);
+  const shortPlanToken = useMemo(() => shortPlanTokenFromHash(initialHash), [initialHash]);
+  const shortHashPresent = useMemo(() => hasShortPlanHash(initialHash), [initialHash]);
+  const sharedHashPresent = useMemo(() => /(?:^|[#&])plan=/.test(initialHash) || shortHashPresent, [initialHash, shortHashPresent]);
+  const legacySharedPlan = useMemo(() => {
     try { return planFromHash(); } catch { return null; }
   }, []);
   const storedPlan = useMemo(() => safeSanitizePlan(readStored(PLAN_KEY, null)), []);
-  const [screen, setScreen] = useState(sharedPlan ? "plan" : "entry");
+  const [screen, setScreen] = useState(legacySharedPlan || shortHashPresent ? "plan" : "entry");
   const [welcomeBackScreen, setWelcomeBackScreen] = useState("entry");
   const [step, setStep] = useState(0);
   const [profile, setProfile] = useState(() => normalizeDraftProfile(readStored(DRAFT_KEY, DEFAULT_PROFILE), DEFAULT_PROFILE));
-  const [plan, setPlan] = useState(sharedPlan);
+  const [plan, setPlan] = useState(legacySharedPlan);
+  const [shortPlanLoadStatus, setShortPlanLoadStatus] = useState(() => shortHashPresent ? (shortPlanToken ? "loading" : "error") : "idle");
+  const [shortPlanLoadError, setShortPlanLoadError] = useState(() => shortHashPresent && !shortPlanToken ? "Ten krótki link wygląda na niepełny." : "");
+  const [shortPlanLoadAttempt, setShortPlanLoadAttempt] = useState(0);
+  const [shortLinkDismissed, setShortLinkDismissed] = useState(false);
   const [queues, setQueues] = useState(null);
   const [queueStatus, setQueueStatus] = useState("loading");
   const [showSchedule, setShowSchedule] = useState(null);
@@ -1104,6 +1220,27 @@ export function App() {
   const weatherRef = useRef(null);
 
   useEffect(() => writeStored(DRAFT_KEY, profile), [profile]);
+  useEffect(() => {
+    if (!shortHashPresent || !shortPlanToken || shortLinkDismissed) return undefined;
+    let cancelled = false;
+    setShortPlanLoadStatus("loading");
+    setShortPlanLoadError("");
+    loadShortPlan(shortPlanToken)
+      .then((loadedPlan) => {
+        if (cancelled) return;
+        setPlan(loadedPlan);
+        writeStored(PLAN_KEY, loadedPlan);
+        setShortPlanLoadStatus("ready");
+        setScreen("plan");
+        window.scrollTo({ top: 0, behavior: "auto" });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setShortPlanLoadStatus("error");
+        setShortPlanLoadError(error instanceof Error ? error.message : "Nie udało się pobrać krótkiego planu.");
+      });
+    return () => { cancelled = true; };
+  }, [shortHashPresent, shortLinkDismissed, shortPlanLoadAttempt, shortPlanToken]);
   const refreshQueues = useCallback(async (signal) => {
     setQueueStatus("loading");
     try {
@@ -1271,17 +1408,37 @@ export function App() {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   }, [buildPlanForProfile, plan, profile, queues]);
 
+  const leaveSharedShortLink = () => {
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    setShortLinkDismissed(true);
+    setScreen("entry");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  };
+
+  const retrySharedShortLink = () => {
+    if (!shortPlanToken) {
+      setShortPlanLoadStatus("error");
+      setShortPlanLoadError("Ten krótki link wygląda na niepełny.");
+      return;
+    }
+    setShortPlanLoadAttempt((attempt) => attempt + 1);
+  };
+
+  if (shortHashPresent && !shortLinkDismissed && (shortPlanLoadStatus !== "ready" || !plan)) {
+    return <SharedPlanStatus status={shortPlanLoadStatus} error={shortPlanLoadError} onRetry={retrySharedShortLink} onStart={leaveSharedShortLink} />;
+  }
+
   if (screen === "entry") {
     return <EntryStart onWeather={() => setScreen("weather")} onPlan={() => prepareFreshPlan({}, "entry")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
   }
 
   if (screen === "weather") {
-    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} damagedLink={sharedHashPresent && !sharedPlan} onBack={() => setScreen("entry")} onContinue={(selection) => prepareFreshPlan(selection, "weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
+    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} damagedLink={sharedHashPresent && !plan} onBack={() => setScreen("entry")} onContinue={(selection) => prepareFreshPlan(selection, "weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
   }
 
   if (screen === "welcome") return <Welcome onStart={beginOnboarding} onBack={() => setScreen(welcomeBackScreen)} backLabel={welcomeBackScreen === "weather" ? "Wróć do pogody" : "Wróć do początku"} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
 
   if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={() => refreshQueues()} generationError={generationError} weatherAssessment={weatherAssessment} />;
   if (!plan) return null;
-  return <PlanView plan={plan} onReanalyze={reanalyze} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} showSchedule={showSchedule} showStatus={showStatus} onRefreshShows={refreshShowsAndReanalyze} onToggleShows={toggleShowsInPlan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
+  return <PlanView plan={plan} initialShortPlanUrl={shortHashPresent && !shortLinkDismissed ? createShortPlanUrl(shortPlanToken) : ""} onReanalyze={reanalyze} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} showSchedule={showSchedule} showStatus={showStatus} onRefreshShows={refreshShowsAndReanalyze} onToggleShows={toggleShowsInPlan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
 }

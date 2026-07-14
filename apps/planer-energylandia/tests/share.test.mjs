@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildUniversalPlan } from "../src/planner.js";
-import { createEmailDraftUrl, decodePlan, encodePlan, sanitizeSharedPlan } from "../src/share.js";
+import {
+  createEmailDraftUrl,
+  createShortPlanLink,
+  decodePlan,
+  encodeCompactPlan,
+  encodePlan,
+  hasShortPlanHash,
+  loadShortPlan,
+  sanitizeSharedPlan,
+  shortPlanTokenFromHash,
+} from "../src/share.js";
 
 const profile = {
   dayCount: 2,
@@ -333,4 +343,64 @@ test("szkic e-maila jasno opisuje wstawiony pokaz", () => {
   const plan = planWithOfficialShow();
   const draft = decodeURIComponent(createEmailDraftUrl("rodzina@example.com", "https://example.com/planer/#plan=sekret", plan));
   assert.match(draft, /18:40 — POKAZ: Funny in Sweet Valley Show \(15 min, Town Hall Theatre\)/);
+});
+
+test("krótki link zapisuje wyłącznie compact v2 i ma klikalny hash bez znaku równości", async () => {
+  const plan = buildUniversalPlan(profile);
+  const token = "AbCdEfGhIjKlMn_o";
+  let request = null;
+  const url = await createShortPlanLink(plan, {
+    apiBase: "https://links.example",
+    href: "https://example.com/zabhop/planer-energylandia/#plan=legacy",
+    fetchImpl: async (input, init) => {
+      request = { input, init };
+      return { ok: true, status: 201, json: async () => ({ token }) };
+    },
+  });
+
+  assert.equal(url, `https://example.com/zabhop/planer-energylandia/#p/${token}`);
+  assert.equal(url.includes("="), false);
+  assert.equal(request.input, "https://links.example/plans");
+  assert.equal(request.init.method, "POST");
+  const body = JSON.parse(request.init.body);
+  assert.deepEqual(Object.keys(body), ["payload"]);
+  assert.equal(body.payload, encodeCompactPlan(plan));
+  assert.equal(JSON.parse(Buffer.from(body.payload, "base64url").toString("utf8")).v, 2);
+  assert.equal(shortPlanTokenFromHash(new URL(url).hash), token);
+  assert.equal(hasShortPlanHash(new URL(url).hash), true);
+});
+
+test("krótki link pobiera plan z API i nadal przechodzi pełną walidację bezpieczeństwa", async () => {
+  const source = buildUniversalPlan(profile);
+  const payload = encodeCompactPlan(source);
+  const token = "pLanTok3n_123456";
+  const loaded = await loadShortPlan(token, {
+    apiBase: "https://links.example/",
+    fetchImpl: async (input, init) => {
+      assert.equal(input, `https://links.example/plans/${token}`);
+      assert.equal(init.method, undefined);
+      return { ok: true, status: 200, json: async () => ({ payload }) };
+    },
+  });
+
+  assert.ok(loaded);
+  assert.equal(loaded.safety.valid, true);
+  assert.deepEqual(loaded.days.map((day) => day.steps.map((step) => step.id)), source.days.map((day) => day.steps.map((step) => step.id)));
+});
+
+test("krótki link nie zamienia błędu API w długi link ani nie przyjmuje niepełnego tokenu", async () => {
+  const plan = buildUniversalPlan(profile);
+  await assert.rejects(
+    () => createShortPlanLink(plan, {
+      apiBase: "https://links.example",
+      fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }),
+    }),
+    (error) => error?.code === "request-failed",
+  );
+  await assert.rejects(
+    () => loadShortPlan("za-krotki", { apiBase: "https://links.example", fetchImpl: async () => { throw new Error("nie powinno wywołać fetch"); } }),
+    (error) => error?.code === "invalid-token",
+  );
+  assert.equal(shortPlanTokenFromHash("#p/za-krotki"), null);
+  assert.equal(hasShortPlanHash("#p/za-krotki"), true);
 });
