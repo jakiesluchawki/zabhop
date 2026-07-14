@@ -9,6 +9,26 @@ const RESTAURANT_IDS = new Set(RESTAURANTS.map((restaurant) => restaurant.id));
 const RESTAURANTS_BY_ID = Object.fromEntries(RESTAURANTS.map((restaurant) => [restaurant.id, restaurant]));
 const VALID_INTERESTS = new Set(["coasters", "water", "family", "scenic"]);
 
+// Link udostępnienia nie potrzebuje kopiować pełnej, opisowej wersji planu.
+// Atrakcje i restauracje są już w aplikacji, więc w v2 przenosimy tylko
+// znaczenie trasy (ID, czasy i bezpieczne przypisania). To mieści plan w
+// komunikatorach bez backendu i bez przekazywania imion.
+const COMPACT_SHARE_VERSION = 2;
+const COMPACT_TIMESTAMP_MINUTE_MIN = 20_000_000;
+const COMPACT_TIMESTAMP_MINUTE_MAX = 100_000_000;
+const PACE_TO_CODE = Object.freeze({ easy: "e", normal: "n", fast: "f" });
+const CODE_TO_PACE = Object.freeze({ e: "easy", n: "normal", f: "fast" });
+const SPLIT_TO_CODE = Object.freeze({ never: "n", worthwhile: "w", often: "o" });
+const CODE_TO_SPLIT = Object.freeze({ n: "never", w: "worthwhile", o: "often" });
+const INTENSITY_TO_CODE = Object.freeze({ calm: "c", mixed: "m", thrill: "t" });
+const CODE_TO_INTENSITY = Object.freeze({ c: "calm", m: "mixed", t: "thrill" });
+const WET_TO_CODE = Object.freeze({ avoid: "a", ok: "o", want: "w" });
+const CODE_TO_WET = Object.freeze({ a: "avoid", o: "ok", w: "want" });
+const MEAL_TO_CODE = Object.freeze({ fast: "f", "sit-down": "s", own: "o", none: "n" });
+const CODE_TO_MEAL = Object.freeze({ f: "fast", s: "sit-down", o: "own", n: "none" });
+const INTEREST_BITS = Object.freeze({ coasters: 1, water: 2, family: 4, scenic: 8 });
+const COMPACT_SHOW_DESCRIPTION = "Pełny, oficjalny opis i aktualne godziny są w kalendarzu pokazów Energylandii w aplikacji.";
+
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -122,6 +142,445 @@ function fromBase64Url(value) {
   const binary = atob(padded);
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+function integerInRange(value, minimum, maximum) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : null;
+}
+
+function compactMinute(value, fallback = 0) {
+  const minute = Math.round(finiteOr(value, fallback));
+  return integerInRange(minute, 0, 1439);
+}
+
+function compactWalkingMinutes(value) {
+  const minutes = Math.round(finiteOr(value, 0));
+  return integerInRange(minutes, 0, 180);
+}
+
+function compactDate(value) {
+  const date = validDateKey(value);
+  return date ? Number(date.replaceAll("-", "")) : 0;
+}
+
+function expandCompactDate(value) {
+  if (value === 0) return null;
+  const compact = integerInRange(value, 10_001_01, 99_991_231);
+  if (compact === null) return null;
+  const date = String(compact).padStart(8, "0");
+  return validDateKey(`${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`);
+}
+
+function compactTimestamp(value) {
+  const timestamp = Date.parse(value ?? "");
+  if (!Number.isFinite(timestamp)) return 0;
+  return Math.floor(timestamp / 60_000);
+}
+
+function expandCompactTimestamp(value, { required = false } = {}) {
+  if (value === 0 && !required) return null;
+  const minute = integerInRange(value, COMPACT_TIMESTAMP_MINUTE_MIN, COMPACT_TIMESTAMP_MINUTE_MAX);
+  return minute === null ? null : new Date(minute * 60_000).toISOString();
+}
+
+function interestsToMask(interests) {
+  return (Array.isArray(interests) ? interests : []).reduce((mask, interest) => mask | (INTEREST_BITS[interest] ?? 0), 0);
+}
+
+function interestsFromMask(value) {
+  const mask = integerInRange(value, 0, 15);
+  if (mask === null) return null;
+  return Object.entries(INTEREST_BITS)
+    .filter(([, bit]) => (mask & bit) === bit)
+    .map(([interest]) => interest);
+}
+
+function compactMapLocation(value) {
+  try {
+    const location = new URL(value).searchParams.get("location");
+    return location && /^[a-z0-9_-]{1,80}$/i.test(location) ? location : null;
+  } catch {
+    return null;
+  }
+}
+
+function anonymousCompactMembers(members) {
+  const roleCounts = { adult: 0, child: 0 };
+  const idToIndex = new Map();
+  const compactMembers = members.map((member, index) => {
+    roleCounts[member.role] += 1;
+    idToIndex.set(member.id, index);
+    return [member.role === "adult" ? 0 : 1, Math.round(member.age), Math.round(member.height)];
+  });
+  return { compactMembers, idToIndex };
+}
+
+function compactMemberMask(ids, idToIndex) {
+  if (!Array.isArray(ids)) return null;
+  let mask = 0;
+  for (const id of ids) {
+    const index = idToIndex.get(id);
+    if (!Number.isInteger(index) || index < 0 || index >= MAX_MEMBERS) return null;
+    const bit = 2 ** index;
+    if (mask & bit) return null;
+    mask += bit;
+  }
+  return mask;
+}
+
+function compactStep(step, { idToIndex }) {
+  const startMin = compactMinute(step.startMin);
+  const endMin = compactMinute(step.endMin);
+  const walkingMinutes = compactWalkingMinutes(step.walkingMinutes);
+  if (startMin === null || endMin === null || walkingMinutes === null || endMin <= startMin) return null;
+
+  if (step.kind === "ride") {
+    const queueMinutes = step.queueMinutes === null || step.queueMinutes === undefined
+      ? -1
+      : integerInRange(Math.round(finiteOr(step.queueMinutes, NaN)), 0, 600);
+    if (!ALL_ATTRACTIONS_BY_ID[step.attractionId] || queueMinutes === null) return null;
+    return ["r", step.attractionId, startMin, endMin, walkingMinutes, queueMinutes];
+  }
+
+  if (step.kind === "meal") {
+    const restaurantId = step.restaurantId ?? "";
+    if (restaurantId !== "" && !RESTAURANT_IDS.has(restaurantId)) return null;
+    return ["m", restaurantId, startMin, endMin, walkingMinutes];
+  }
+
+  if (step.kind === "flex") {
+    const unplannedUntil = step.unplannedUntil === null || step.unplannedUntil === undefined
+      ? 0
+      : compactMinute(step.unplannedUntil);
+    const backupAttractionIds = Array.isArray(step.backupAttractionIds) ? step.backupAttractionIds : [];
+    if (
+      unplannedUntil === null
+      || backupAttractionIds.length > 3
+      || backupAttractionIds.some((id) => !ALL_ATTRACTIONS_BY_ID[id])
+      || new Set(backupAttractionIds).size !== backupAttractionIds.length
+    ) return null;
+    return ["f", startMin, endMin, unplannedUntil, backupAttractionIds];
+  }
+
+  if (step.kind === "show") {
+    const showId = String(step.showId || "");
+    const title = cleanRequiredText(step.title, 140);
+    const venue = cleanRequiredText(step.venue, 140);
+    const mapLocation = compactMapLocation(step.mapUrl);
+    const performanceStartMin = compactMinute(step.performanceStartMin);
+    const durationMinutes = integerInRange(Math.round(finiteOr(step.durationMinutes, NaN)), 5, 180);
+    const sourceCheckedAt = compactTimestamp(step.sourceCheckedAt);
+    const performanceTimes = Array.isArray(step.performanceTimes)
+      ? step.performanceTimes.map((time) => timeToMinutes(time, -1))
+      : [];
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,99}$/i.test(showId)
+      || !title
+      || !venue
+      || !mapLocation
+      || performanceStartMin === null
+      || durationMinutes === null
+      || sourceCheckedAt === 0
+      || performanceTimes.length < 1
+      || performanceTimes.length > 16
+      || performanceTimes.some((time) => integerInRange(time, 0, 1439) === null)
+      || !performanceTimes.includes(performanceStartMin)
+      || endMin !== performanceStartMin + durationMinutes
+    ) return null;
+    return ["h", showId, title, venue, mapLocation, startMin, performanceStartMin, durationMinutes, performanceTimes, sourceCheckedAt, walkingMinutes];
+  }
+
+  if (step.kind === "split") {
+    const assignments = Array.isArray(step.assignments) ? step.assignments : [];
+    const first = assignments[0];
+    const second = assignments[1];
+    const firstMask = compactMemberMask(first?.memberIds, idToIndex);
+    if (
+      assignments.length !== 2
+      || !ALL_ATTRACTIONS_BY_ID[first?.attractionId]
+      || !ALL_ATTRACTIONS_BY_ID[second?.attractionId]
+      || firstMask === null
+    ) return null;
+    return ["s", first.attractionId, second.attractionId, startMin, endMin, walkingMinutes, firstMask];
+  }
+
+  return null;
+}
+
+function compactSnapshotFromPlan(sanitized) {
+  const { compactMembers, idToIndex } = anonymousCompactMembers(sanitized.profile.members);
+  const profile = sanitized.profile;
+  const days = sanitized.days.map((day) => day.steps.map((step) => compactStep(step, { idToIndex })));
+  if (days.some((steps) => steps.some((step) => step === null))) return null;
+  const generatedAt = compactTimestamp(sanitized.generatedAt);
+  if (generatedAt === 0) return null;
+
+  return {
+    v: COMPACT_SHARE_VERSION,
+    p: [
+      compactDate(profile.visitStartDate),
+      timeToMinutes(profile.arrivalTime, -1),
+      timeToMinutes(profile.departureTime, -1),
+      PACE_TO_CODE[profile.pace],
+      SPLIT_TO_CODE[profile.splitPolicy],
+      INTENSITY_TO_CODE[profile.preferences.intensity],
+      interestsToMask(profile.preferences.interests),
+      WET_TO_CODE[profile.preferences.wet],
+      Math.round(profile.preferences.maxQueue),
+      MEAL_TO_CODE[profile.meal.mode],
+      timeToMinutes(profile.meal.time, -1),
+      profile.entertainment.includeShows ? 1 : 0,
+      compactMembers,
+    ],
+    t: [generatedAt, compactTimestamp(sanitized.queueSnapshotAt ? new Date(sanitized.queueSnapshotAt).toISOString() : null)],
+    d: days,
+  };
+}
+
+function expandCompactMembers(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_MEMBERS) return null;
+  const roleCounts = { adult: 0, child: 0 };
+  const members = [];
+  for (const tuple of value) {
+    if (!Array.isArray(tuple) || tuple.length !== 3) return null;
+    const role = tuple[0] === 0 ? "adult" : tuple[0] === 1 ? "child" : null;
+    const age = integerInRange(tuple[1], 0, 110);
+    const height = integerInRange(tuple[2], 50, 230);
+    if (!role || age === null || height === null) return null;
+    roleCounts[role] += 1;
+    members.push({
+      id: `${role}-${roleCounts[role]}`,
+      role,
+      name: role === "adult" ? `Dorosły ${roleCounts[role]}` : `Dziecko ${roleCounts[role]}`,
+      age,
+      height,
+    });
+  }
+  return members;
+}
+
+function memberIdsFromMask(mask, members) {
+  const maximumMask = 2 ** members.length - 1;
+  if (integerInRange(mask, 1, maximumMask) === null) return null;
+  return members.filter((member, index) => (mask & (2 ** index)) !== 0).map((member) => member.id);
+}
+
+function expandedCompactStep(entry, { dayIndex, stepIndex, profile, members, previousKind }) {
+  if (!Array.isArray(entry) || typeof entry[0] !== "string") return null;
+  const kind = entry[0];
+  const startMin = compactMinute(entry[kind === "h" ? 5 : kind === "s" ? 3 : kind === "r" || kind === "m" ? 2 : 1]);
+  // Pokaz zapisuje start występu i czas trwania (bez nadmiarowego endMin),
+  // więc jego koniec obliczamy niżej z tych dwóch wartości.
+  const endMin = kind === "h"
+    ? null
+    : compactMinute(entry[kind === "s" ? 4 : kind === "r" || kind === "m" ? 3 : 2]);
+  const walkingMinutes = compactWalkingMinutes(entry[kind === "h" ? 10 : kind === "s" ? 5 : kind === "r" || kind === "m" ? 4 : 0]);
+  if (startMin === null || (kind !== "h" && (endMin === null || endMin <= startMin)) || (kind !== "f" && walkingMinutes === null)) return null;
+
+  if (kind === "r" && entry.length === 6) {
+    const attraction = ALL_ATTRACTIONS_BY_ID[entry[1]];
+    const queueMinutes = entry[5] === -1 ? null : integerInRange(entry[5], 0, 600);
+    if (!attraction || queueMinutes === null && entry[5] !== -1) return null;
+    return {
+      id: `day-${dayIndex + 1}-ride-${attraction.id}`,
+      kind: "ride",
+      attractionId: attraction.id,
+      zone: attraction.zone,
+      routeOrder: attraction.routeOrder,
+      score: 0,
+      why: "",
+      startMin,
+      endMin,
+      walkingMinutes,
+      queueMinutes,
+      memberIds: members.map((member) => member.id),
+    };
+  }
+
+  if (kind === "m" && entry.length === 5) {
+    const restaurantId = entry[1] || null;
+    const restaurant = restaurantId ? RESTAURANTS_BY_ID[restaurantId] : null;
+    if ((restaurantId && !restaurant) || (!restaurant && profile.meal.mode !== "own")) return null;
+    return {
+      id: `day-${dayIndex + 1}-meal`,
+      kind: "meal",
+      restaurantId,
+      title: restaurant?.name ?? "Przerwa na własny prowiant",
+      description: restaurant?.description ?? "Spokojna przerwa bez szukania restauracji.",
+      zone: restaurant?.zone ?? "family-zone",
+      startMin,
+      endMin,
+      walkingMinutes,
+    };
+  }
+
+  if (kind === "f" && entry.length === 5) {
+    const unplannedUntil = entry[3] === 0 ? null : compactMinute(entry[3]);
+    const backupAttractionIds = entry[4];
+    if (
+      unplannedUntil === null && entry[3] !== 0
+      || !Array.isArray(backupAttractionIds)
+      || backupAttractionIds.length > 3
+      || backupAttractionIds.some((id) => !ALL_ATTRACTIONS_BY_ID[id])
+      || new Set(backupAttractionIds).size !== backupAttractionIds.length
+    ) return null;
+    const afterShow = previousKind === "show";
+    return {
+      id: `day-${dayIndex + 1}-${afterShow ? "flex-after-show" : "flex"}`,
+      kind: "flex",
+      title: afterShow ? "Bufor po pokazie" : "Bufor na prawdziwy park",
+      description: afterShow
+        ? "Pokaz nie skraca rdzenia trasy. Nadal zostawiamy czas na kolejki, WC, odpoczynek i bezpieczne domknięcie dnia."
+        : "Kolejki, toalety, odpoczynek i spontaniczne decyzje — tego bloku celowo nie wypełniamy co do minuty.",
+      startMin,
+      endMin,
+      unplannedUntil,
+      backupAttractionIds,
+    };
+  }
+
+  if (kind === "h" && entry.length === 11) {
+    const showId = String(entry[1] || "");
+    const title = cleanRequiredText(entry[2], 140);
+    const venue = cleanRequiredText(entry[3], 140);
+    const mapLocation = String(entry[4] || "");
+    const performanceStartMin = compactMinute(entry[6]);
+    const durationMinutes = integerInRange(entry[7], 5, 180);
+    const performanceTimes = Array.isArray(entry[8])
+      ? entry[8].map((time) => compactMinute(time)).filter((time) => time !== null)
+      : [];
+    const sourceCheckedAt = expandCompactTimestamp(entry[9], { required: true });
+    const showEndMin = performanceStartMin === null || durationMinutes === null ? null : performanceStartMin + durationMinutes;
+    if (
+      !/^[a-z0-9][a-z0-9-]{0,99}$/i.test(showId)
+      || !title
+      || !venue
+      || !/^[a-z0-9_-]{1,80}$/i.test(mapLocation)
+      || performanceStartMin === null
+      || durationMinutes === null
+      || performanceTimes.length < 1
+      || performanceTimes.length > 16
+      || new Set(performanceTimes).size !== performanceTimes.length
+      || !performanceTimes.includes(performanceStartMin)
+      || !sourceCheckedAt
+      || showEndMin === null
+      || showEndMin >= 24 * 60
+    ) return null;
+    return {
+      id: `day-${dayIndex + 1}-show-${showId}-${performanceStartMin}`,
+      kind: "show",
+      showId,
+      title,
+      description: COMPACT_SHOW_DESCRIPTION,
+      venue,
+      officialUrl: `https://energylandia.pl/show/${showId}/`,
+      mapUrl: `https://energylandia.pl/mapa-parku/?location=${encodeURIComponent(mapLocation)}`,
+      performanceTimes: performanceTimes.map(formatPlanTime),
+      sourceCheckedAt,
+      startMin,
+      performanceStartMin,
+      endMin: showEndMin,
+      durationMinutes,
+      walkingMinutes,
+    };
+  }
+
+  if (kind === "s" && entry.length === 7) {
+    const mainAttraction = ALL_ATTRACTIONS_BY_ID[entry[1]];
+    const alternativeAttraction = ALL_ATTRACTIONS_BY_ID[entry[2]];
+    const firstMemberIds = memberIdsFromMask(entry[6], members);
+    const firstMask = integerInRange(entry[6], 1, 2 ** members.length - 1);
+    const secondMemberIds = firstMask === null ? null : memberIdsFromMask((2 ** members.length - 1) - firstMask, members);
+    if (!mainAttraction || !alternativeAttraction || !firstMemberIds || !secondMemberIds) return null;
+    return {
+      id: `day-${dayIndex + 1}-split-${mainAttraction.id}`,
+      kind: "split",
+      attractionId: mainAttraction.id,
+      alternativeAttractionId: alternativeAttraction.id,
+      zone: mainAttraction.zone,
+      routeOrder: mainAttraction.routeOrder,
+      score: 0,
+      startMin,
+      endMin,
+      walkingMinutes,
+      assignments: [
+        { label: "Mocniejsza trasa", attractionId: mainAttraction.id, memberIds: firstMemberIds },
+        { label: "Trasa równoległa", attractionId: alternativeAttraction.id, memberIds: secondMemberIds },
+      ],
+      reunion: { label: `Spotkanie przy ${mainAttraction.name}`, time: formatPlanTime(endMin) },
+    };
+  }
+
+  return null;
+}
+
+function expandCompactSnapshot(snapshot) {
+  if (!isRecord(snapshot) || snapshot.v !== COMPACT_SHARE_VERSION || !Array.isArray(snapshot.p) || snapshot.p.length !== 13 || !Array.isArray(snapshot.t) || snapshot.t.length !== 2 || !Array.isArray(snapshot.d) || snapshot.d.length < 1 || snapshot.d.length > 3) return null;
+  const [date, arrival, departure, paceCode, splitCode, intensityCode, interestMask, wetCode, maxQueue, mealCode, mealTime, includeShows, compactMembers] = snapshot.p;
+  const visitStartDate = expandCompactDate(date);
+  const arrivalMinute = compactMinute(arrival);
+  const departureMinute = compactMinute(departure);
+  const interests = interestsFromMask(interestMask);
+  const members = expandCompactMembers(compactMembers);
+  const generatedAt = expandCompactTimestamp(snapshot.t[0], { required: true });
+  const queueCheckedAt = expandCompactTimestamp(snapshot.t[1]);
+  const pace = CODE_TO_PACE[paceCode];
+  const splitPolicy = CODE_TO_SPLIT[splitCode];
+  const intensity = CODE_TO_INTENSITY[intensityCode];
+  const wet = CODE_TO_WET[wetCode];
+  const mealMode = CODE_TO_MEAL[mealCode];
+  const requestedMealMinute = compactMinute(mealTime);
+  if (
+    (date !== 0 && !visitStartDate)
+    || arrivalMinute === null
+    || departureMinute === null
+    || !interests
+    || !members
+    || !generatedAt
+    || !pace
+    || !splitPolicy
+    || !intensity
+    || !wet
+    || !mealMode
+    || requestedMealMinute === null
+    || includeShows !== 0 && includeShows !== 1
+    || integerInRange(maxQueue, 15, 90) === null
+  ) return null;
+  const profile = {
+    dayCount: snapshot.d.length,
+    visitStartDate,
+    arrivalTime: formatPlanTime(arrivalMinute),
+    departureTime: formatPlanTime(departureMinute),
+    pace,
+    splitPolicy,
+    preferences: { intensity, interests, wet, maxQueue },
+    meal: { mode: mealMode, time: formatPlanTime(requestedMealMinute) },
+    entertainment: { includeShows: includeShows === 1 },
+    members,
+  };
+  const days = [];
+  for (let dayIndex = 0; dayIndex < snapshot.d.length; dayIndex += 1) {
+    const compactSteps = snapshot.d[dayIndex];
+    if (!Array.isArray(compactSteps) || compactSteps.length > MAX_STEPS_PER_DAY) return null;
+    const steps = [];
+    let previousKind = null;
+    for (let stepIndex = 0; stepIndex < compactSteps.length; stepIndex += 1) {
+      const step = expandedCompactStep(compactSteps[stepIndex], { dayIndex, stepIndex, profile, members, previousKind });
+      if (!step) return null;
+      steps.push(step);
+      previousKind = step.kind;
+    }
+    days.push({ steps });
+  }
+  return {
+    version: 1,
+    generatedAt,
+    queueSnapshotAt: queueCheckedAt ? Date.parse(queueCheckedAt) : null,
+    profile,
+    days,
+  };
 }
 
 function cleanMember(member, index) {
@@ -418,6 +877,9 @@ export function encodePlan(plan) {
   const sanitized = sanitizeSharedPlan(plan);
   if (!sanitized) return "";
 
+  const compactSnapshot = compactSnapshotFromPlan(sanitized);
+  if (compactSnapshot) return toBase64Url(JSON.stringify(compactSnapshot));
+
   // Wiek i wzrost są potrzebne do ponownej weryfikacji ograniczeń atrakcji.
   // Imiona i potencjalnie identyfikujące ID nie są — link dostaje neutralne
   // oznaczenia, a przydziały podgrup są przepinane na nowe identyfikatory.
@@ -466,7 +928,12 @@ export function encodePlan(plan) {
 export function decodePlan(payload) {
   try {
     if (!payload || payload.length > 24_000) return null;
-    return sanitizeSharedPlan(JSON.parse(fromBase64Url(payload)));
+    const snapshot = JSON.parse(fromBase64Url(payload));
+    if (isRecord(snapshot) && snapshot.v === COMPACT_SHARE_VERSION) {
+      const expanded = expandCompactSnapshot(snapshot);
+      return expanded ? sanitizeSharedPlan(expanded) : null;
+    }
+    return sanitizeSharedPlan(snapshot);
   } catch {
     return null;
   }
