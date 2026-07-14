@@ -51,10 +51,17 @@ import {
   sanitizeSharedPlan,
 } from "./share.js";
 import {
+  ADULT_AGE_RANGE_OPTIONS,
   approximateWalkingMinutes,
+  ageRangeFor,
+  ageRangeLabel,
+  CHILD_AGE_RANGE_OPTIONS,
   countPlanAttractions,
   distanceMeters,
   formatDistance,
+  HEIGHT_RANGE_OPTIONS,
+  heightRangeFor,
+  heightRangeLabel,
   normalizeDraftProfile,
   queueFreshness,
 } from "./appUtils.js";
@@ -87,8 +94,8 @@ const DEFAULT_PROFILE = Object.freeze({
   pace: "normal",
   splitPolicy: "worthwhile",
   members: [
-    { id: "adult-1", role: "adult", name: "Dorosły 1", age: 35, height: 175 },
-    { id: "adult-2", role: "adult", name: "Dorosły 2", age: 35, height: 175 },
+    { id: "adult-1", role: "adult", name: "Dorosły 1", age: 18, height: 170 },
+    { id: "adult-2", role: "adult", name: "Dorosły 2", age: 18, height: 170 },
     { id: "child-1", role: "child", name: "Dziecko 1", age: 6, height: 120 },
     { id: "child-2", role: "child", name: "Dziecko 2", age: 6, height: 120 },
   ],
@@ -121,7 +128,7 @@ function writeStored(key, value) {
 
 function defaultMember(role, index) {
   return role === "adult"
-    ? { id: `adult-${index + 1}`, role, name: `Dorosły ${index + 1}`, age: 35, height: 175 }
+    ? { id: `adult-${index + 1}`, role, name: `Dorosły ${index + 1}`, age: 18, height: 170 }
     : { id: `child-${index + 1}`, role, name: `Dziecko ${index + 1}`, age: 6, height: 120 };
 }
 
@@ -139,6 +146,43 @@ function resizeMembers(members, role, requestedCount) {
 
 function memberLabel(member) {
   return member?.name?.trim() || (member?.role === "adult" ? "Dorosły" : "Dziecko");
+}
+
+function MemberRangeFields({ member, updateMember, agesValid, heightsValid }) {
+  const ageRange = ageRangeFor(member.role, member.age);
+  const heightRange = heightRangeFor(member.height);
+  const ageOptions = member.role === "adult" ? ADULT_AGE_RANGE_OPTIONS : CHILD_AGE_RANGE_OPTIONS;
+
+  return (
+    <div className="range-field-grid">
+      <label>
+        <span>Wiek</span>
+        <select
+          aria-label={`${memberLabel(member)}: przedział wieku`}
+          aria-invalid={!ageRange}
+          aria-describedby={!agesValid ? "age-validation-error" : undefined}
+          value={ageRange?.value ?? ""}
+          onChange={(event) => updateMember(member.id, "age", Number(event.target.value))}
+        >
+          {!ageRange && <option value="" disabled>Wybierz przedział</option>}
+          {ageOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Wzrost</span>
+        <select
+          aria-label={`${memberLabel(member)}: przedział wzrostu`}
+          aria-invalid={!heightRange}
+          aria-describedby={!heightsValid ? "height-validation-error" : undefined}
+          value={heightRange?.value ?? ""}
+          onChange={(event) => updateMember(member.id, "height", Number(event.target.value))}
+        >
+          {!heightRange && <option value="" disabled>Wybierz przedział</option>}
+          {HEIGHT_RANGE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+        </select>
+      </label>
+    </div>
+  );
 }
 
 function offsetDateKey(dateKey, offset) {
@@ -453,22 +497,19 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
           <>
             <p className="eyebrow">BEZPIECZEŃSTWO PRZEDE WSZYSTKIM</p>
             <h1 ref={headingRef} tabIndex="-1">Wiek i wzrost każdej osoby</h1>
-            <p className="step-lead">Nie zgaduj w górę. Obsługa i pomiar przy wejściu zawsze mają ostatnie słowo.</p>
+            <p className="step-lead">Wybierz przedział, nie wpisuj liczb. Plan liczy dolną granicę zakresu; pomiar przy wejściu zawsze ma ostatnie słowo.</p>
             <WizardIllustration step={step} />
             <div className="member-stack">
               {profile.members.map((member, index) => (
                 <article className={`member-card ${member.role}`} key={member.id} role="group" aria-labelledby={`member-title-${member.id}`}>
                   <div className="member-card-title"><span>{index + 1}</span><strong id={`member-title-${member.id}`}>{member.role === "adult" ? "Dorosły" : "Dziecko / nastolatek"}</strong></div>
                   <label className="wide-field"><span>Imię lub skrót — opcjonalnie</span><input type="text" maxLength="40" aria-label={`${memberLabel(member)}: imię lub skrót`} value={member.name} onChange={(event) => updateMember(member.id, "name", event.target.value)} /></label>
-                  <div className="number-field-grid">
-                    <label><span>Wiek</span><div><input inputMode="numeric" type="number" min="0" max="110" aria-label={`${memberLabel(member)}: wiek`} aria-invalid={member.role === "adult" ? Number(member.age) < 18 || Number(member.age) > 110 : Number(member.age) < 0 || Number(member.age) > 17} aria-describedby={!agesValid ? "age-validation-error" : undefined} value={member.age} onChange={(event) => updateMember(member.id, "age", Number(event.target.value))} /><em>lat</em></div></label>
-                    <label><span>Wzrost</span><div><input inputMode="numeric" type="number" min="50" max="230" aria-label={`${memberLabel(member)}: wzrost`} aria-invalid={Number(member.height) < 50 || Number(member.height) > 230} aria-describedby={!heightsValid ? "height-validation-error" : undefined} value={member.height} onChange={(event) => updateMember(member.id, "height", Number(event.target.value))} /><em>cm</em></div></label>
-                  </div>
+                  <MemberRangeFields member={member} updateMember={updateMember} agesValid={agesValid} heightsValid={heightsValid} />
                 </article>
               ))}
             </div>
-            {!agesValid && <div className="warning-note" id="age-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Dorośli opiekunowie muszą mieć co najmniej 18 lat; w tej sekcji dzieci i nastolatki mają 0–17 lat.</span></div>}
-            {!heightsValid && <div className="warning-note" id="height-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Podaj rzeczywisty wzrost każdej osoby w zakresie 50–230 cm.</span></div>}
+            {!agesValid && <div className="warning-note" id="age-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Wybierz przedział wieku: opiekun ma co najmniej 18 lat, a dziecko lub nastolatek ma 0–17 lat.</span></div>}
+            {!heightsValid && <div className="warning-note" id="height-validation-error" role="alert"><WarningCircle size={21} weight="fill" /><span>Wybierz przedział wzrostu dla każdej osoby.</span></div>}
           </>
         )}
 
@@ -546,7 +587,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
             <WizardIllustration step={step} />
             <div className="review-card">
               <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.dayCount} {profile.dayCount === 1 ? "dzień" : "dni"}{profile.visitStartDate ? ` od ${formatPolishDay(profile.visitStartDate, true)}` : ""}</strong><small>{profile.arrivalTime}–{profile.departureTime} · tempo {profile.pace === "easy" ? "spokojne" : profile.pace === "fast" ? "szybkie" : "normalne"}</small></span></div>
-              <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)} ${member.height} cm`).join(" · ")}</small></span></div>
+              <div><UsersThree size={22} weight="duotone" /><span><strong>{profile.members.length} osób</strong><small>{profile.members.map((member) => `${memberLabel(member)}: ${ageRangeLabel(member.role, member.age)} · ${heightRangeLabel(member.height)}`).join(" · ")}</small></span></div>
               <div><Sparkle size={22} weight="duotone" /><span><strong>{profile.preferences.intensity === "thrill" ? "Mocny dzień" : profile.preferences.intensity === "calm" ? "Spokojny dzień" : "Po trochu"}</strong><small>kolejki do {profile.preferences.maxQueue} min · woda: {profile.preferences.wet === "avoid" ? "nie" : profile.preferences.wet === "want" ? "tak" : "może być"}</small></span></div>
               <div><ArrowsSplit size={22} weight="duotone" /><span><strong>{effectiveSplitPolicy === "never" ? "Zawsze razem" : effectiveSplitPolicy === "often" ? "Podział dozwolony" : "Jeden wartościowy podział"}</strong><small>{profile.meal.mode === "none" ? "bez zaplanowanego obiadu" : `obiad około ${profile.meal.time}`}</small></span></div>
               <div><CalendarBlank size={22} weight="duotone" /><span><strong>{profile.entertainment?.includeShows ? "Sprawdź pokazy na żywo" : "Bez pokazów w trasie"}</strong><small>{profile.entertainment?.includeShows ? "Tylko świeży oficjalny terminarz i tylko bez skracania dnia." : "Możesz zmienić to w kroku „Apetyt”."}</small></span></div>
@@ -698,7 +739,7 @@ function PrintablePlan({ plan, planUrl, preview = false }) {
 
         <div className="pdf-party-panel">
           <figure><img src={`${import.meta.env.BASE_URL}assets/onboarding/02-sklad.jpg`} alt="Filcowa grupa uczestników" /></figure>
-          <section><p className="pdf-kicker">SKŁAD I OGRANICZENIA</p><h2>Każda osoba policzona osobno.</h2><ul>{plan.profile.members.map((member) => <li key={member.id}><strong>{memberLabel(member)}</strong><span>{member.age} lat · {member.height} cm</span></li>)}</ul></section>
+          <section><p className="pdf-kicker">SKŁAD I OGRANICZENIA</p><h2>Każda osoba policzona osobno.</h2><ul>{plan.profile.members.map((member) => <li key={member.id}><strong>{memberLabel(member)}</strong><span>{ageRangeLabel(member.role, member.age)} · {heightRangeLabel(member.height)}</span></li>)}</ul></section>
         </div>
 
         <aside className="pdf-live-note"><strong>Ten dokument jest mapą dnia, nie danymi na żywo.</strong><span>Kolejki, pogoda i alert Antistorm zmieniają się — przed kolejnym punktem otwórzcie żywy plan z linku na dole.</span></aside>
