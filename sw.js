@@ -14,6 +14,7 @@ const SHELL = [
   "./felt-compass.png?v=10",
   "./felt-arrow.png?v=10",
   "./stores.json",
+  "./stores-manifest.json",
   "./other-stores.json",
   "./privacy.html",
   "./support.html",

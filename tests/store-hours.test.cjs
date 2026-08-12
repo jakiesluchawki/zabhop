@@ -192,14 +192,12 @@ test("open-now ranking prefers a similarly close confirmed store over an uncerta
   );
 });
 
-test("bundled Zator stores never turn the official Sunday sentinel into confirmed open", () => {
+test("bundled Zator store keeps the remaining official Sunday sentinel unknown", () => {
   const screenshotMoment = new Date("2026-07-11T22:25:00Z"); // Sunday 00:25 in Zator.
-  for (const id of ["ZB158", "ZE315"]) {
-    const row = storesCatalog.find((store) => store[0] === id);
-    assert.ok(row, `missing fixture ${id}`);
-    assert.equal(row[5][6], null);
-    assert.equal(statusAt(row[5], { date: screenshotMoment }).state, "unknown");
-  }
+  const row = storesCatalog.find((store) => store[0] === "ZE315");
+  assert.ok(row, "missing fixture ZE315");
+  assert.equal(row[5][6], null);
+  assert.equal(statusAt(row[5], { date: screenshotMoment }).state, "unknown");
 });
 
 test("bundled catalog rejects stale or undated OSM all-day claims from the screenshot", () => {

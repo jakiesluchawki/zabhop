@@ -8,6 +8,11 @@ on:
       - "apps/pogoda-energylandia/**"
       - "apps/planer-energylandia/**"
       - "pogoda-energylandia/**"
+      - "stores.json"
+      - "stores-manifest.json"
+      - "privacy.html"
+      - "sw.js"
+      - ".github/workflows/refresh-zabka-catalog.yml"
       - ".github/workflows/update-energylandia.yml"
   workflow_dispatch:
   schedule:
