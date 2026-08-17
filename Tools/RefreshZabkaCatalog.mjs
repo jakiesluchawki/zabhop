@@ -16,13 +16,46 @@ const nativeResources = path.join(root, "ZabHop", "Resources");
 const require = createRequire(import.meta.url);
 const { normalizeOfficialHours } = require(path.join(webDirectory, "store-hours.js"));
 const officialURL = "https://www.zabka.pl/app/uploads/locator-store-data.json";
+const retryDelaysMs = [5_000, 15_000, 45_000];
+const retryableStatuses = new Set([403, 408, 425, 429, 500, 502, 503, 504]);
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 async function loadOfficial() {
   const local = process.env.ZABHOP_OFFICIAL_INPUT;
   if (local) return JSON.parse(fs.readFileSync(local, "utf8"));
-  const response = await fetch(officialURL, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`Official Żabka feed returned HTTP ${response.status}`);
-  return response.json();
+
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(officialURL, {
+        headers: {
+          Accept: "application/json",
+          Referer: "https://www.zabka.pl/znajdz-sklep/",
+          "User-Agent": "ZabHop catalog refresh (https://github.com/jakiesluchawki/zabhop)"
+        }
+      });
+    } catch (error) {
+      if (attempt >= retryDelaysMs.length) throw error;
+      const delay = retryDelaysMs[attempt];
+      console.warn(`Official Żabka feed request failed; retrying in ${delay / 1000}s`);
+      await wait(delay);
+      continue;
+    }
+    if (response.ok) return response.json();
+
+    const shouldRetry = retryableStatuses.has(response.status) && attempt < retryDelaysMs.length;
+    if (!shouldRetry) throw new Error(`Official Żabka feed returned HTTP ${response.status}`);
+
+    await response.body?.cancel();
+    const delay = retryDelaysMs[attempt];
+    console.warn(`Official Żabka feed returned HTTP ${response.status}; retrying in ${delay / 1000}s`);
+    await wait(delay);
+  }
+
+  throw new Error("Official Żabka feed could not be loaded");
 }
 
 function cleanAddress(value) {
