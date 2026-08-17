@@ -24,12 +24,12 @@ jobs:
         run: node Tools/RefreshZabkaCatalog.mjs
       - name: Commit changed catalog
         run: |
-          if git diff --quiet -- web/stores.json web/stores-manifest.json ZabHop/Resources/stores.json; then
+          if git diff --quiet -- stores.json stores-manifest.json ZabHop/Resources/stores.json; then
             echo "Catalog unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add web/stores.json web/stores-manifest.json ZabHop/Resources/stores.json
+          git add stores.json stores-manifest.json ZabHop/Resources/stores.json
           git commit -m "chore: refresh Żabka store catalog"
           git push
