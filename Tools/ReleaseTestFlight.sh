@@ -8,6 +8,7 @@ EXPECTED_TEAM="${ZABHOP_IOS_TEAM_ID:-78N6WG8P57}"
 EXPECTED_BUNDLE_ID="${ZABHOP_IOS_BUNDLE_ID:-pl.mieszkomahboob.zabhop}"
 RELEASE_ROOT="${ZABHOP_TESTFLIGHT_DIR:-$PROJECT_DIR/.local/releases/testflight}"
 BUILD_NUMBER="${ZABHOP_BUILD_NUMBER:-$(date -u '+%Y%m%d%H%M%S')}"
+ARCHIVE_SIGNING_MODE="${ZABHOP_ARCHIVE_SIGNING_MODE:-signed}"
 BUILD_STAMP=$(date '+%Y%m%d-%H%M%S')
 WORK_DIR="$RELEASE_ROOT/$BUILD_STAMP"
 ARCHIVE_PATH="$WORK_DIR/ZabHop.xcarchive"
@@ -61,6 +62,14 @@ if [ -n "$SIGNING_KEYCHAIN_PATH$SIGNING_KEYCHAIN_PASSWORD_FILE$SIGNING_IDENTITY$
   SIGNING_STYLE="manual"
 else
   SIGNING_STYLE="automatic"
+fi
+
+case "$ARCHIVE_SIGNING_MODE" in
+  signed|unsigned) ;;
+  *) fail "ZABHOP_ARCHIVE_SIGNING_MODE must be signed or unsigned." ;;
+esac
+if [ "$ARCHIVE_SIGNING_MODE" = "unsigned" ] && [ "$SIGNING_STYLE" != "automatic" ]; then
+  fail "unsigned archiving requires automatic export signing; do not set manual signing variables."
 fi
 
 mkdir -p "$WORK_DIR" "$DERIVED_DATA" "$TEST_DERIVED_DATA" "$EXPORT_DIR"
@@ -169,8 +178,11 @@ if [ "$SIGNING_STYLE" = "manual" ]; then
     CODE_SIGN_STYLE=Manual \
     "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY" \
     "PROVISIONING_PROFILE_SPECIFIER=$SIGNING_PROFILE" \
-    "DEVELOPMENT_TEAM=$EXPECTED_TEAM" \
-    "OTHER_CODE_SIGN_FLAGS=--keychain \"$SIGNING_KEYCHAIN_PATH\""
+    "DEVELOPMENT_TEAM=$EXPECTED_TEAM"
+fi
+
+if [ "$ARCHIVE_SIGNING_MODE" = "unsigned" ]; then
+  set -- "$@" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
 fi
 
 set -- "$@" archive

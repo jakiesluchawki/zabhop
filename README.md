@@ -61,7 +61,13 @@ ZABHOP_SIGNING_KEYCHAIN_PASSWORD_FILE='/ścieżka/do/lokalnego-pliku-z-hasłem' 
 sh Tools/ReleaseTestFlight.sh
 ```
 
-Plik hasła jest opcjonalny, jeśli pęk został już odblokowany. Przy jego podaniu skrypt odblokowuje wyłącznie wskazany istniejący pęk kluczy; nie wypisuje hasła, nie zapisuje go w repozytorium ani nie zmienia listy pęków czy uprawnień klucza. Podpis ręczny wykorzystuje tę samą tożsamość i profil podczas tworzenia archiwum oraz wysyłki do TestFlight.
+Plik hasła jest opcjonalny, jeśli pęk został już odblokowany. Przy jego podaniu skrypt odblokowuje wyłącznie wskazany istniejący pęk kluczy; nie wypisuje hasła, nie zapisuje go w repozytorium ani nie zmienia listy pęków czy uprawnień klucza. Podpis ręczny wymaga ręcznie zarządzanego profilu i wykorzystuje tę samą tożsamość podczas tworzenia archiwum oraz wysyłki do TestFlight.
+
+Jeżeli dostępny profil dystrybucyjny jest zarządzany automatycznie przez Xcode, można przygotować niepodpisane archiwum; prawidłowy podpis App Store zostanie zastosowany automatycznie dopiero podczas eksportu i wysyłki:
+
+```sh
+ZABHOP_ARCHIVE_SIGNING_MODE=unsigned sh Tools/ReleaseTestFlight.sh
+```
 
 ```sh
 sh Tools/ReleaseTestFlight.sh
