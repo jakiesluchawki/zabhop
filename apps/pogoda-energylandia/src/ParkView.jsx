@@ -449,7 +449,7 @@ export function ParkView({ weather, onRefreshNowcast, nowcastRefreshing = false 
       const queue = queueForAttraction(attraction, queues);
       return [attraction.id, queue ? {
         minutes: queue.waitTime,
-        status: queue.isOpen ? "open" : "closed",
+        status: queue.isOpen === false ? "closed" : queue.isOpen === true ? "open" : "unknown",
       } : null];
     }),
   ), [queues]);
@@ -717,7 +717,7 @@ export function ParkView({ weather, onRefreshNowcast, nowcastRefreshing = false 
           <span className="route-number">{index + 1}</span>
           <span className="route-copy"><strong>{stop.name}</strong><small>{zoneName(stop.zone)} • {restrictionLabel(stop)}</small></span>
           <span className="route-meta">
-            <span className={`route-wait ${queue && !queue.isOpen ? "closed" : ""} ${completed ? "completed" : ""}`}>{completed ? "zaliczone" : queueLabel(queue)}</span>
+            <span className={`route-wait ${queue?.isOpen === false ? "closed" : ""} ${completed ? "completed" : ""}`}>{completed ? "zaliczone" : queueLabel(queue)}</span>
             <span className={`route-distance ${distanceLabel ? "live" : ""}`}>
               <Footprints size={11} weight="bold" aria-hidden="true" />
               {distanceLabel ? `${distanceLabel} · ${walkLabel}` : "włącz GPS"}
@@ -809,7 +809,7 @@ export function ParkView({ weather, onRefreshNowcast, nowcastRefreshing = false 
                 <h2 id="next-stop-title">{nextStop.name}</h2>
                 <p>{restrictionLabel(nextStop)} • {nextStop.reason || "dobry krok na rodzinnej trasie"}</p>
               </div>
-              <span className={`queue-badge ${nextQueue && !nextQueue.isOpen ? "closed" : ""}`}>
+              <span className={`queue-badge ${nextQueue?.isOpen === false ? "closed" : ""}`}>
                 <Timer size={16} weight="bold" /> {queueLabel(nextQueue)}
               </span>
             </div>

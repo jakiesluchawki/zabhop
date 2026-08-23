@@ -76,3 +76,41 @@ test("warstwa pokazów nic nie zmienia bez świadomego wyboru", () => {
   const unchanged = overlayShowsOnPlan(base, scheduleFor(base), { now: Date.parse("2026-07-14T10:30:00.000Z") });
   assert.equal(unchanged, base);
 });
+
+test("oficjalne godziny z kalendarza mogą wejść do bufora tylko z aktualnym, kompletnym opisem", () => {
+  const now = Date.parse("2026-07-14T10:30:00.000Z");
+  const base = buildUniversalPlan(profile());
+  const details = scheduleFor(base, { checkedAt: "2026-07-14T10:00:00.000Z" });
+  const performance = details.shows[0].schedule[0].times[0];
+  const parkCalendar = {
+    source: {
+      url: "https://energylandia.pl/kalendarz/",
+      checkedAt: "2026-07-14T10:15:00.000Z",
+      status: "fresh",
+    },
+    days: {
+      "2026-07-14": {
+        date: "2026-07-14",
+        status: "open",
+        opensAt: "10:00",
+        closesAt: "20:00",
+        shows: [{ title: details.shows[0].title, url: details.shows[0].url, times: [performance] }],
+      },
+    },
+  };
+  details.shows[0].schedule = [];
+  const merged = overlayShowsOnPlan(base, details, { now, parkCalendar });
+  const plannedShow = merged.days[0].steps.find((step) => step.kind === "show");
+
+  assert.ok(plannedShow);
+  assert.equal(plannedShow.performanceStartMin, Number(performance.slice(0, 2)) * 60 + Number(performance.slice(3)));
+  assert.equal(plannedShow.sourceCheckedAt, "2026-07-14T10:15:00.000Z");
+  assert.equal(merged.safety.valid, true);
+
+  const staleDetails = structuredClone(details);
+  staleDetails.source.checkedAt = "2026-07-13T03:00:00.000Z";
+  staleDetails.shows[0].checkedAt = "2026-07-13T03:00:00.000Z";
+  const blocked = overlayShowsOnPlan(base, staleDetails, { now, parkCalendar });
+  assert.equal(blocked.days[0].steps.some((step) => step.kind === "show"), false);
+  assert.equal(blocked.safety.valid, true);
+});

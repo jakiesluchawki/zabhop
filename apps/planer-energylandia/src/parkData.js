@@ -332,6 +332,7 @@ export const ATTRACTIONS = Object.freeze([
     id: "rmf-dragon",
     name: "RMF Dragon",
     osmId: "node/7338922201",
+    officialNumber: 34,
     zone: "family-zone",
     location: Object.freeze({ lat: 49.9999609, lon: 19.4063934 }),
     restrictions: { minHeightWithGuardian: 120, soloHeight: 130 },

@@ -1,4 +1,6 @@
 import { distanceMeters, walkingMinutes } from "./parkLogic.js";
+import { parkDayForDate } from "./parkCalendar.js";
+import { QUEUE_STALE_AFTER_MINUTES } from "./queues.js";
 import {
   ALL_ATTRACTIONS,
   ALL_ATTRACTIONS_BY_ID,
@@ -24,6 +26,10 @@ const INTENSITY_TARGET = Object.freeze({ calm: 1, mixed: 3, thrill: 5 });
 const FLEX_MINUTES_MIN = 60;
 const FLEX_MINUTES_MAX = 90;
 const MAX_CORE_ITEMS_PER_DAY = 12;
+const MAX_LOCATION_ACCURACY_METERS = 150;
+const MAX_DISTANCE_FROM_PARK_METERS = 1_000;
+const WALKING_SCORE_PENALTY_PER_MINUTE = 5;
+const CHANGING_ZONE_SCORE_PENALTY = 12;
 
 function finiteNumber(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -185,10 +191,220 @@ export function evaluatePartyEligibility(attraction, members) {
 
 function queueStateFor(attraction, queueById = {}) {
   const queue = queueById[attraction.id] ?? null;
+  const trusted = queue?.stale !== true && !["stale", "unknown"].includes(queue?.freshness);
+  const confirmedOpen = trusted && queue?.isOpen === true;
   return {
-    isOpen: queue?.isOpen !== false,
-    waitTime: Number.isFinite(queue?.waitTime) ? queue.waitTime : null,
+    isOpen: !trusted || queue?.isOpen !== false,
+    waitTime: confirmedOpen && Number.isFinite(queue?.waitTime) ? queue.waitTime : null,
   };
+}
+
+function warsawDateFor(timestamp) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Warsaw",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function visitDateForDay(dateKey, dayIndex) {
+  const firstDate = normalizeDateKey(dateKey);
+  if (!firstDate) return null;
+  const date = new Date(`${firstDate}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + dayIndex);
+  return date.toISOString().slice(0, 10);
+}
+
+export function resolveOfficialVisitWindow(profile, parkCalendar, { now = Date.now() } = {}) {
+  const requestedArrivalTime = normalizeTime(profile?.arrivalTime, "10:00");
+  const requestedDepartureTime = normalizeTime(profile?.departureTime, "20:00");
+  const dayCount = Math.min(3, Math.max(1, Number(profile?.dayCount) || 1));
+  const initial = {
+    state: "assumed",
+    arrivalTime: requestedArrivalTime,
+    departureTime: requestedDepartureTime,
+    requestedArrivalTime,
+    requestedDepartureTime,
+    officialOpensAt: null,
+    officialClosesAt: null,
+    days: [],
+    issues: [],
+  };
+
+  if (!parkCalendar || !normalizeDateKey(profile?.visitStartDate)) return initial;
+
+  const days = Array.from({ length: dayCount }, (_, index) => {
+    const date = visitDateForDay(profile.visitStartDate, index);
+    return parkDayForDate(parkCalendar, date, { now });
+  });
+  const closedDays = days.filter((day) => day.confirmed === true && day.state === "closed");
+  if (closedDays.length) {
+    return {
+      ...initial,
+      state: "closed",
+      days,
+      issues: closedDays.map((day) => `Oficjalny kalendarz potwierdza, że park jest zamknięty ${day.date}.`),
+    };
+  }
+
+  const confirmedOpenDays = days.filter((day) =>
+    day.confirmed === true
+    && day.state === "open"
+    && normalizeTime(day.opensAt, null)
+    && normalizeTime(day.closesAt, null)
+    && timeToMinutes(day.closesAt, 0) > timeToMinutes(day.opensAt, 1439),
+  );
+  if (!confirmedOpenDays.length) return { ...initial, days };
+
+  const officialOpen = Math.max(...confirmedOpenDays.map((day) => timeToMinutes(day.opensAt)));
+  const officialClose = Math.min(...confirmedOpenDays.map((day) => timeToMinutes(day.closesAt)));
+  const arrival = Math.max(timeToMinutes(requestedArrivalTime), officialOpen);
+  const departure = Math.min(timeToMinutes(requestedDepartureTime), officialClose);
+  const result = {
+    ...initial,
+    state: "confirmed",
+    arrivalTime: formatPlanTime(arrival),
+    departureTime: formatPlanTime(departure),
+    officialOpensAt: formatPlanTime(officialOpen),
+    officialClosesAt: formatPlanTime(officialClose),
+    days,
+  };
+
+  if (departure - arrival < 60) {
+    return {
+      ...result,
+      state: "outside-hours",
+      issues: [
+        `Wybrane godziny ${requestedArrivalTime}–${requestedDepartureTime} nie dają co najmniej godziny w oficjalnym oknie ${result.officialOpensAt}–${result.officialClosesAt}.`,
+      ],
+    };
+  }
+
+  return result;
+}
+
+function normalizedPlanProfile(profile, dayCount, members) {
+  return {
+    dayCount,
+    visitStartDate: normalizeDateKey(profile.visitStartDate),
+    arrivalTime: normalizeTime(profile.arrivalTime, "10:00"),
+    departureTime: normalizeTime(profile.departureTime, "20:00"),
+    pace: profile.pace,
+    splitPolicy: profile.splitPolicy,
+    preferences: profile.preferences,
+    entertainment: { includeShows: profile?.entertainment?.includeShows === true },
+    meal: profile.meal,
+    members: members.map((member) => ({ ...member })),
+  };
+}
+
+function unavailableParkPlan(profile, dayCount, members, visitWindow) {
+  const safeProfile = normalizedPlanProfile(profile, dayCount, members);
+  const arrival = safeProfile.arrivalTime;
+  const days = Array.from({ length: dayCount }, (_, index) => ({
+    day: index + 1,
+    label: `Dzień ${index + 1}`,
+    steps: [],
+    stats: {
+      attractions: 0,
+      walkingMinutes: 0,
+      start: arrival,
+      end: arrival,
+      coreEnd: arrival,
+      declaredDeparture: safeProfile.departureTime,
+    },
+  }));
+
+  return {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    profile: safeProfile,
+    days,
+    queueSnapshotAt: profile.queueSnapshotAt ?? null,
+    safety: { valid: false, issues: [...visitWindow.issues] },
+    firstAttractionId: null,
+  };
+}
+
+function currentQueueSnapshot(profile, queueById, now) {
+  // The pure planner also accepts hand-built queue fixtures without metadata.
+  // The application always declares queueSnapshotAt, so an absent or invalid
+  // timestamp there cannot silently become trusted live evidence.
+  if (!Object.prototype.hasOwnProperty.call(profile ?? {}, "queueSnapshotAt")) return queueById;
+
+  const value = profile.queueSnapshotAt;
+  if (value === null || value === undefined || value === "") return {};
+  const timestamp = typeof value === "number" ? value : Date.parse(value);
+  const currentTime = now instanceof Date ? now.getTime() : Number(now);
+  if (!Number.isFinite(timestamp) || !Number.isFinite(currentTime)) return {};
+
+  const ageMinutes = (currentTime - timestamp) / 60_000;
+  if (ageMinutes < -5 || ageMinutes > QUEUE_STALE_AFTER_MINUTES) return {};
+
+  const visitDate = normalizeDateKey(profile.visitStartDate);
+  if (visitDate && visitDate !== warsawDateFor(timestamp)) return {};
+  return queueById;
+}
+
+function reliableParkPosition(position, profile, attractions, now) {
+  if (!position || !Array.isArray(attractions) || attractions.length === 0) return null;
+  const lat = finiteNumber(position.lat ?? position.latitude);
+  const lon = finiteNumber(position.lon ?? position.lng ?? position.longitude);
+  const accuracy = finiteNumber(position.accuracy);
+  const currentTime = now instanceof Date ? now.getTime() : Number(now);
+  const visitDate = normalizeDateKey(profile?.visitStartDate);
+
+  if (
+    lat === null || Math.abs(lat) > 90
+    || lon === null || Math.abs(lon) > 180
+    || accuracy === null || accuracy < 0 || accuracy > MAX_LOCATION_ACCURACY_METERS
+    || !Number.isFinite(currentTime)
+    || !visitDate || visitDate !== warsawDateFor(currentTime)
+  ) return null;
+
+  const point = { lat, lon, accuracy };
+  const nearPark = attractions.some((attraction) => distanceMeters(point, attraction) <= MAX_DISTANCE_FROM_PARK_METERS);
+  return nearPark ? point : null;
+}
+
+function routeFromCurrentPosition(day, position, queueById) {
+  if (!position || day.index !== 0 || day.items.length < 2) return day;
+
+  const remaining = [...day.items];
+  const ordered = [];
+  let origin = position;
+  let previousZone = null;
+
+  while (remaining.length) {
+    const ranked = remaining.map((item, index) => {
+      const attraction = ALL_ATTRACTIONS_BY_ID[item.attractionId];
+      if (!attraction) return null;
+      const distance = distanceMeters(origin, attraction);
+      const walk = walkingMinutes(distance);
+      const queue = queueStateForDay(attraction, queueById, day.index);
+      // `item.score` already includes the verified live queue and the group's
+      // preferences. The extra walk and zone penalties only choose a sensible
+      // order among attractions which have already passed every safety gate.
+      const score = item.score
+        - walk * WALKING_SCORE_PENALTY_PER_MINUTE
+        - (previousZone && previousZone !== attraction.zone ? CHANGING_ZONE_SCORE_PENALTY : 0)
+        - (Number.isFinite(queue.waitTime) ? queue.waitTime * 0.15 : 0);
+      return { item, index, attraction, distance, score };
+    }).filter(Boolean)
+      .sort((a, b) => b.score - a.score || a.distance - b.distance || a.item.routeOrder - b.item.routeOrder);
+
+    const selected = ranked[0];
+    if (!selected) return day;
+    ordered.push(selected.item);
+    remaining.splice(selected.index, 1);
+    origin = selected.attraction;
+    previousZone = selected.attraction.zone;
+  }
+
+  return { ...day, items: ordered };
 }
 
 function maximumQueueMinutes(profile) {
@@ -394,7 +610,7 @@ function queueStateForDay(attraction, queueById, dayIndex) {
   return queueStateFor(attraction, queueById);
 }
 
-function scheduleDay(day, profile, queueById, backupAttractions = []) {
+function scheduleDay(day, profile, queueById, backupAttractions = [], startPosition = null) {
   const arrival = timeToMinutes(profile.arrivalTime, 600);
   const requestedDeparture = timeToMinutes(profile.departureTime, 1200);
   const departure = Math.min(1439, Math.max(arrival + 60, requestedDeparture));
@@ -405,7 +621,7 @@ function scheduleDay(day, profile, queueById, backupAttractions = []) {
   const mealEnabled = profile.meal?.mode !== "none";
   const steps = [];
   let minute = arrival;
-  let previousAttraction = null;
+  let previousAttraction = startPosition;
   let mealInserted = false;
   let walkingTotal = 0;
   const scheduledAttractionIds = new Set();
@@ -614,18 +830,46 @@ function scheduleDay(day, profile, queueById, backupAttractions = []) {
   };
 }
 
-export function buildUniversalPlan(profile, { attractions = ALL_ATTRACTIONS, queueById = {} } = {}) {
+export function buildUniversalPlan(profile, {
+  attractions = ALL_ATTRACTIONS,
+  queueById = {},
+  now = Date.now(),
+  currentPosition = null,
+  parkCalendar = null,
+} = {}) {
   const members = Array.isArray(profile?.members) ? profile.members : [];
   const dayCount = Math.min(3, Math.max(1, Number(profile?.dayCount) || 1));
+  const visitWindow = resolveOfficialVisitWindow(profile, parkCalendar, { now });
+  if (["closed", "outside-hours"].includes(visitWindow.state)) {
+    return unavailableParkPlan(profile, dayCount, members, visitWindow);
+  }
+  if (visitWindow.state === "confirmed") {
+    const arrival = timeToMinutes(visitWindow.arrivalTime);
+    const departure = timeToMinutes(visitWindow.departureTime);
+    const requestedMeal = timeToMinutes(profile?.meal?.time, -1);
+    profile = {
+      ...profile,
+      arrivalTime: visitWindow.arrivalTime,
+      departureTime: visitWindow.departureTime,
+      meal: profile?.meal && profile.meal.mode !== "none" && (requestedMeal <= arrival || requestedMeal >= departure)
+        ? { ...profile.meal, time: formatPlanTime(Math.round((arrival + departure) / 2)) }
+        : profile.meal,
+    };
+  }
   const capacity = capacityForProfile(profile);
   const usedIds = new Set();
-  const snapshotLooksOffHours = attractions.length > 0
-    && attractions.every((attraction) => queueById?.[attraction.id]?.isOpen === false);
+  const currentQueues = currentQueueSnapshot(profile, queueById, now);
+  const confirmedQueues = attractions
+    .map((attraction) => currentQueues?.[attraction.id])
+    .filter((queue) => typeof queue?.isOpen === "boolean" && queue?.stale !== true);
+  const snapshotLooksOffHours = confirmedQueues.length >= Math.min(3, attractions.length)
+    && confirmedQueues.every((queue) => queue.isOpen === false);
   // Onboarding does not ask whether this is a live, on-site visit. When the
   // whole snapshot is closed (typically outside park hours), plan neutrally
   // instead of turning an otherwise valid future visit into an empty day.
   // A mixed snapshot still keeps individual live closures authoritative.
-  const effectiveQueueById = snapshotLooksOffHours ? {} : queueById;
+  const effectiveQueueById = snapshotLooksOffHours ? {} : currentQueues;
+  const parkPosition = reliableParkPosition(currentPosition, profile, attractions, now);
 
   const ranked = attractions
     .map((attraction) => {
@@ -678,7 +922,8 @@ export function buildUniversalPlan(profile, { attractions = ALL_ATTRACTIONS, que
         : `Pasuje całej grupie; kolejka około ${entry.queue.waitTime} min.`,
     }));
 
-  const allocated = allocateToDays([...splitItems, ...wholeItems], dayCount, capacity);
+  const allocated = allocateToDays([...splitItems, ...wholeItems], dayCount, capacity)
+    .map((day) => routeFromCurrentPosition(day, parkPosition, effectiveQueueById));
   const allocatedIds = new Set(allocated.flatMap((day) => day.items.flatMap((item) =>
     item.kind === "split" ? [item.attractionId, item.alternativeAttractionId] : [item.attractionId],
   )));
@@ -698,22 +943,17 @@ export function buildUniversalPlan(profile, { attractions = ALL_ATTRACTIONS, que
     options.forEach((attraction) => backupUsed.add(attraction.id));
     return options;
   });
-  const days = allocated.map((day, index) => scheduleDay(day, profile, effectiveQueueById, backupByDay[index]));
+  const days = allocated.map((day, index) => scheduleDay(
+    day,
+    profile,
+    effectiveQueueById,
+    backupByDay[index],
+    index === 0 ? parkPosition : null,
+  ));
   const plan = {
     version: 1,
     generatedAt: new Date().toISOString(),
-    profile: {
-      dayCount,
-      visitStartDate: normalizeDateKey(profile.visitStartDate),
-      arrivalTime: normalizeTime(profile.arrivalTime, "10:00"),
-      departureTime: normalizeTime(profile.departureTime, "20:00"),
-      pace: profile.pace,
-      splitPolicy: profile.splitPolicy,
-      preferences: profile.preferences,
-      entertainment: { includeShows: profile?.entertainment?.includeShows === true },
-      meal: profile.meal,
-      members: members.map((member) => ({ ...member })),
-    },
+    profile: normalizedPlanProfile(profile, dayCount, members),
     days,
     queueSnapshotAt: profile.queueSnapshotAt ?? null,
   };

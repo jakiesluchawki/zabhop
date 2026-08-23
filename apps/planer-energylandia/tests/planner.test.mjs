@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ALL_ATTRACTIONS_BY_ID } from "../src/extendedData.js";
+import { distanceMeters } from "../src/parkLogic.js";
 import {
   attractionLabel,
   buildUniversalPlan,
   evaluateMemberEligibility,
   evaluatePartyEligibility,
+  resolveOfficialVisitWindow,
   timeToMinutes,
   validatePlanSafety,
 } from "../src/planner.js";
@@ -25,6 +27,17 @@ function profile(overrides = {}) {
     preferences: { intensity: "mixed", interests: ["coasters", "family"], wet: "ok", maxQueue: 45 },
     meal: { mode: "fast", time: "13:15" },
     ...overrides,
+  };
+}
+
+function officialCalendar(days, { checkedAt = "2026-08-31T10:00:00.000Z", status = "fresh" } = {}) {
+  return {
+    source: {
+      url: "https://energylandia.pl/kalendarz/",
+      checkedAt,
+      status,
+    },
+    days,
   };
 }
 
@@ -226,6 +239,214 @@ test("zamknięta atrakcja i twarde unikanie wody nie trafiają do planu", () => 
   const ids = plan.days.flatMap((day) => day.steps.flatMap((step) => step.kind === "ride" ? [step.attractionId] : step.kind === "split" ? step.assignments.map((assignment) => assignment.attractionId) : []));
   assert.equal(ids.includes("hyperion"), false);
   assert.equal(ids.some((id) => ALL_ATTRACTIONS_BY_ID[id].wet), false);
+});
+
+test("aktualna migawka może eliminować potwierdzone zamknięcie tylko dla tego samego dnia", () => {
+  const now = Date.parse("2026-07-14T10:30:00.000Z");
+  const queueSnapshotAt = Date.parse("2026-07-14T10:15:00.000Z");
+  const queueById = {
+    hyperion: { isOpen: false, waitTime: 0 },
+    formula: { isOpen: true, waitTime: 10 },
+  };
+  const adultProfile = profile({
+    members: [adult("a1"), adult("a2")],
+    preferences: { intensity: "thrill", interests: ["coasters"], wet: "ok", maxQueue: 90 },
+    queueSnapshotAt,
+  });
+  const rideIds = (plan) => plan.days[0].steps.flatMap((step) => step.kind === "ride" ? [step.attractionId] : []);
+
+  assert.equal(rideIds(buildUniversalPlan(adultProfile, { queueById, now })).includes("hyperion"), false);
+
+  const tomorrow = buildUniversalPlan({ ...adultProfile, visitStartDate: "2026-07-15" }, { queueById, now });
+  assert.equal(rideIds(tomorrow).includes("hyperion"), true);
+  assert.ok(tomorrow.days[0].steps.filter((step) => step.kind === "ride").every((step) => step.queueMinutes === null));
+  assert.equal(tomorrow.safety.valid, true);
+});
+
+test("nieaktualna lub nieudatowana migawka nie wyklucza atrakcji ani nie pokazuje czasu jako live", () => {
+  const now = Date.parse("2026-07-14T14:00:00.000Z");
+  const queueById = {
+    hyperion: { isOpen: false, waitTime: 0 },
+    formula: { isOpen: true, waitTime: 90 },
+  };
+  const adultProfile = profile({
+    members: [adult("a1"), adult("a2")],
+    preferences: { intensity: "thrill", interests: ["coasters"], wet: "ok", maxQueue: 15 },
+  });
+
+  for (const queueSnapshotAt of ["2026-07-14T10:00:00.000Z", null, "nieprawidłowa data"]) {
+    const plan = buildUniversalPlan({ ...adultProfile, queueSnapshotAt }, { queueById, now });
+    const rides = plan.days[0].steps.filter((step) => step.kind === "ride");
+    assert.equal(rides.some((step) => step.attractionId === "hyperion"), true);
+    assert.equal(rides.some((step) => step.attractionId === "formula"), true);
+    assert.ok(rides.every((step) => step.queueMinutes === null));
+    assert.equal(plan.safety.valid, true);
+  }
+});
+
+test("nieznany status i pojedyncze stare wpisy nie udają pewnego zamknięcia ani kolejki", () => {
+  const queueById = {
+    hyperion: { isOpen: null, waitTime: 0 },
+    formula: { isOpen: false, waitTime: 90, stale: true },
+  };
+  const plan = buildUniversalPlan(profile({
+    members: [adult("a1"), adult("a2")],
+    preferences: { intensity: "thrill", interests: ["coasters"], wet: "ok", maxQueue: 15 },
+  }), { queueById });
+  const rides = plan.days[0].steps.filter((step) => step.kind === "ride");
+
+  assert.equal(rides.some((step) => step.attractionId === "hyperion"), true);
+  assert.equal(rides.some((step) => step.attractionId === "formula"), true);
+  assert.equal(rides.find((step) => step.attractionId === "hyperion").queueMinutes, null);
+  assert.equal(rides.find((step) => step.attractionId === "formula").queueMinutes, null);
+  assert.equal(plan.safety.valid, true);
+});
+
+test("wiarygodny GPS w dniu wizyty skraca dojście do pierwszej bezpiecznej atrakcji", () => {
+  const now = Date.parse("2026-07-14T10:00:00.000Z");
+  const energus = ALL_ATTRACTIONS_BY_ID.energus;
+  const position = { lat: energus.location.lat + 0.00018, lon: energus.location.lon, accuracy: 18 };
+  const baseline = buildUniversalPlan(profile(), { now });
+  const nearby = buildUniversalPlan(profile(), { now, currentPosition: position });
+  const firstBaseline = ALL_ATTRACTIONS_BY_ID[baseline.firstAttractionId];
+  const firstNearby = ALL_ATTRACTIONS_BY_ID[nearby.firstAttractionId];
+  const firstStep = nearby.days[0].steps.find((step) => step.kind === "ride");
+
+  assert.ok(distanceMeters(position, firstNearby) + 200 < distanceMeters(position, firstBaseline));
+  assert.ok(firstStep.walkingMinutes >= 1);
+  assert.ok(nearby.days[0].stats.walkingMinutes >= firstStep.walkingMinutes);
+  assert.equal(nearby.safety.valid, true);
+});
+
+test("GPS nie omija wzrostu, opiekuna, zamknięcia ani twardego limitu kolejki", () => {
+  const now = Date.parse("2026-07-14T10:00:00.000Z");
+  const energus = ALL_ATTRACTIONS_BY_ID.energus;
+  const hyperion = ALL_ATTRACTIONS_BY_ID.hyperion;
+  const queueById = {
+    energus: { isOpen: false, waitTime: 0 },
+    "frutti-loop": { isOpen: true, waitTime: 75 },
+    formula: { isOpen: true, waitTime: 10 },
+  };
+  const plan = buildUniversalPlan(profile({
+    preferences: { intensity: "mixed", interests: ["coasters", "family"], wet: "ok", maxQueue: 15 },
+  }), {
+    queueById,
+    now,
+    currentPosition: { lat: hyperion.location.lat, lon: hyperion.location.lon, accuracy: 12 },
+  });
+  const rideIds = plan.days[0].steps.flatMap((step) => step.kind === "ride" ? [step.attractionId] : []);
+
+  assert.equal(rideIds.includes("hyperion"), false);
+  assert.equal(rideIds.includes("energus"), false);
+  assert.equal(rideIds.includes("frutti-loop"), false);
+  assert.equal(plan.safety.valid, true);
+  assert.ok(distanceMeters(energus, ALL_ATTRACTIONS_BY_ID[plan.firstAttractionId]) < 2_000);
+});
+
+test("słaby GPS, pozycja poza parkiem oraz plan na inny dzień zachowują dotychczasową trasę", () => {
+  const now = Date.parse("2026-07-14T10:00:00.000Z");
+  const energus = ALL_ATTRACTIONS_BY_ID.energus;
+  const rideIds = (plan) => plan.days[0].steps.flatMap((step) => step.kind === "ride" ? [step.attractionId] : []);
+  const currentProfile = profile();
+  const expected = rideIds(buildUniversalPlan(currentProfile, { now }));
+  const rejectedPositions = [
+    { ...energus.location, accuracy: 151 },
+    { ...energus.location, accuracy: null },
+    { lat: 52.2297, lon: 21.0122, accuracy: 8 },
+    { lat: 91, lon: energus.location.lon, accuracy: 8 },
+  ];
+
+  for (const currentPosition of rejectedPositions) {
+    assert.deepEqual(rideIds(buildUniversalPlan(currentProfile, { now, currentPosition })), expected);
+  }
+
+  const futureProfile = { ...currentProfile, visitStartDate: "2026-07-15" };
+  const futureBaseline = buildUniversalPlan(futureProfile, { now });
+  const futureWithGps = buildUniversalPlan(futureProfile, {
+    now,
+    currentPosition: { ...energus.location, accuracy: 10 },
+  });
+  assert.deepEqual(rideIds(futureWithGps), rideIds(futureBaseline));
+  assert.equal(futureWithGps.days[0].stats.walkingMinutes, futureBaseline.days[0].stats.walkingMinutes);
+});
+
+test("oficjalne godziny 10:00–18:00 ograniczają cały plan i zachowują kompatybilny horyzont", () => {
+  const now = Date.parse("2026-08-31T10:30:00.000Z");
+  const parkCalendar = officialCalendar({
+    "2026-09-01": { date: "2026-09-01", status: "open", opensAt: "10:00", closesAt: "18:00", shows: [] },
+  });
+  const requested = profile({ visitStartDate: "2026-09-01", arrivalTime: "09:00", departureTime: "20:00" });
+  const window = resolveOfficialVisitWindow(requested, parkCalendar, { now });
+  const plan = buildUniversalPlan(requested, { parkCalendar, now });
+
+  assert.equal(window.state, "confirmed");
+  assert.equal(window.arrivalTime, "10:00");
+  assert.equal(window.departureTime, "18:00");
+  assert.equal(window.officialOpensAt, "10:00");
+  assert.equal(window.officialClosesAt, "18:00");
+  assert.equal(plan.profile.arrivalTime, "10:00");
+  assert.equal(plan.profile.departureTime, "18:00");
+  assert.equal(plan.days[0].stats.start, "10:00");
+  assert.equal(plan.days[0].stats.end, "18:00");
+  assert.ok(plan.days[0].steps.every((step) => step.startMin >= 10 * 60 && step.endMin <= 18 * 60));
+  assert.equal(plan.safety.valid, true);
+});
+
+test("wielodniowy plan stosuje konserwatywne przecięcie potwierdzonych godzin bez psucia linków", () => {
+  const now = Date.parse("2026-08-31T10:30:00.000Z");
+  const parkCalendar = officialCalendar({
+    "2026-09-01": { date: "2026-09-01", status: "open", opensAt: "10:00", closesAt: "20:00", shows: [] },
+    "2026-09-02": { date: "2026-09-02", status: "open", opensAt: "11:00", closesAt: "18:00", shows: [] },
+  });
+  const plan = buildUniversalPlan(profile({ dayCount: 2, visitStartDate: "2026-09-01" }), { parkCalendar, now });
+
+  assert.equal(plan.profile.arrivalTime, "11:00");
+  assert.equal(plan.profile.departureTime, "18:00");
+  assert.ok(plan.days.every((day) => day.stats.start === "11:00" && day.stats.end === "18:00"));
+  assert.ok(plan.days.every((day) => day.steps.at(-1).unplannedUntil === 18 * 60 || day.steps.at(-1).endMin === 18 * 60));
+  assert.equal(plan.safety.valid, true);
+});
+
+test("potwierdzone zamknięcie albo okno poza godzinami nie sugeruje żadnej wizyty", () => {
+  const now = Date.parse("2026-08-31T10:30:00.000Z");
+  const closedCalendar = officialCalendar({
+    "2026-09-01": { date: "2026-09-01", status: "closed", opensAt: null, closesAt: null, shows: [] },
+  });
+  const closed = buildUniversalPlan(profile({ visitStartDate: "2026-09-01" }), { parkCalendar: closedCalendar, now });
+
+  assert.equal(closed.firstAttractionId, null);
+  assert.equal(closed.days[0].steps.length, 0);
+  assert.equal(closed.safety.valid, false);
+  assert.match(closed.safety.issues[0], /zamknięty/);
+
+  const openCalendar = officialCalendar({
+    "2026-09-01": { date: "2026-09-01", status: "open", opensAt: "10:00", closesAt: "18:00", shows: [] },
+  });
+  const outside = buildUniversalPlan(profile({
+    visitStartDate: "2026-09-01",
+    arrivalTime: "19:00",
+    departureTime: "20:00",
+  }), { parkCalendar: openCalendar, now });
+  assert.equal(outside.days[0].steps.length, 0);
+  assert.equal(outside.safety.valid, false);
+  assert.match(outside.safety.issues[0], /oficjalnym oknie 10:00–18:00/);
+});
+
+test("stary lub brakujący kalendarz nie udaje oficjalnego zamknięcia ani zmienionych godzin", () => {
+  const now = Date.parse("2026-08-31T10:30:00.000Z");
+  const staleCalendar = officialCalendar({
+    "2026-09-01": { date: "2026-09-01", status: "closed", shows: [] },
+  }, { checkedAt: "2026-08-20T10:00:00.000Z" });
+  const requested = profile({ visitStartDate: "2026-09-01" });
+  const window = resolveOfficialVisitWindow(requested, staleCalendar, { now });
+  const plan = buildUniversalPlan(requested, { parkCalendar: staleCalendar, now });
+
+  assert.equal(window.state, "assumed");
+  assert.equal(window.days[0].state, "unknown");
+  assert.equal(plan.profile.arrivalTime, "10:00");
+  assert.equal(plan.profile.departureTime, "20:00");
+  assert.ok(plan.days[0].steps.some((step) => step.kind === "ride"));
+  assert.equal(plan.safety.valid, true);
 });
 
 test("jednodniowy plan poza godzinami otwarcia używa neutralnej migawki zamiast pustego dnia", () => {

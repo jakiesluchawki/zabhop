@@ -20,6 +20,29 @@ function dryHours(dateKey) {
   }));
 }
 
+function officialCalendar(days, checkedAt = "2026-07-13T07:00:00.000Z") {
+  return {
+    schemaVersion: 1,
+    source: {
+      label: "Oficjalny kalendarz Energylandii",
+      url: "https://energylandia.pl/kalendarz/",
+      checkedAt,
+      status: "fresh",
+      timezone: "Europe/Warsaw",
+      range: { from: "2026-07-13", to: "2026-07-15" },
+    },
+    days: Object.fromEntries(Object.entries(days).map(([date, value]) => [date, {
+      date,
+      status: "open",
+      opensAt: "10:00",
+      closesAt: "20:00",
+      title: "",
+      shows: [],
+      ...value,
+    }])),
+  };
+}
+
 test("trzy kompletne, dobre dni uzasadniają pobyt trzydniowy", () => {
   const result = recommendVisitLength([
     day("2026-07-13", 84, "wysoka", 0),
@@ -98,6 +121,32 @@ test("zupełny brak danych nie udaje rekomendacji jednego dnia", () => {
   assert.match(result.summary, /Nie kupuj/);
 });
 
+test("dzień zamknięty w oficjalnym kalendarzu nie może wejść do rekomendacji wizyty", () => {
+  const result = recommendVisitLength([
+    { ...day("2026-07-13", null, "wysoka", 0), park: { state: "closed", confirmed: true } },
+    day("2026-07-14", 83, "wysoka", 1),
+    day("2026-07-15", 77, "wysoka", 2),
+  ]);
+
+  assert.equal(result.dayCount, 2);
+  assert.deepEqual(result.selectedDateKeys, ["2026-07-14", "2026-07-15"]);
+  assert.ok(result.warnings.some((warning) => warning.includes("zamknięcie parku")));
+  assert.equal(result.warnings.some((warning) => warning.includes("Brakuje uczciwej oceny")), false);
+});
+
+test("trzy oficjalnie zamknięte dni dostają jasny werdykt zamiast fałszywego braku pogody", () => {
+  const result = recommendVisitLength([
+    { ...day("2026-07-13", null, "wysoka", 0), park: { state: "closed", confirmed: true } },
+    { ...day("2026-07-14", null, "wysoka", 1), park: { state: "closed", confirmed: true } },
+    { ...day("2026-07-15", null, "wysoka", 2), park: { state: "closed", confirmed: true } },
+  ]);
+
+  assert.equal(result.dayCount, null);
+  assert.equal(result.status, "park-closed");
+  assert.equal(result.confidence, "wysoka");
+  assert.match(result.headline, /zamknięty/);
+});
+
 test("pełna ocena oddziela alarm Antistorm od prognozy dnia i wybiera bezpieczniejszy ciąg", () => {
   const now = new Date("2026-07-13T08:30:00.000Z");
   const weather = {
@@ -165,4 +214,62 @@ test("brak klucza dzisiejszego dnia nie przesuwa tomorrow do roli live nowcast",
   assert.equal(result.days[1].recommendation.antistormStatus, "zielony");
   assert.equal(result.visit.dayCount, 2);
   assert.deepEqual(result.visit.selectedIndices, [1, 2]);
+});
+
+test("ocena pogody respektuje rzeczywiste godziny otwarcia i nie proponuje dnia zamkniętego", () => {
+  const weather = {
+    today: "2026-07-13",
+    tomorrow: "2026-07-14",
+    dayAfterTomorrow: "2026-07-15",
+    days: {
+      "2026-07-13": dryHours("2026-07-13"),
+      "2026-07-14": dryHours("2026-07-14"),
+      "2026-07-15": dryHours("2026-07-15"),
+    },
+    icm: { updatedAt: "2026-07-13T02:00:00.000Z" },
+    numericSourceCount: 3,
+  };
+  const parkCalendar = officialCalendar({
+    "2026-07-13": { opensAt: "11:30", closesAt: "18:30" },
+    "2026-07-14": { status: "closed", opensAt: null, closesAt: null },
+    "2026-07-15": { opensAt: "10:00", closesAt: "18:00" },
+  });
+
+  const result = assessThreeDayWeather(weather, {
+    now: new Date("2026-07-13T07:30:00.000Z"),
+    parkCalendar,
+  });
+
+  assert.equal(result.days[0].park.state, "open");
+  assert.ok(result.days[0].recommendation.hours.every((hour) => hour.hour >= 12 && hour.hour < 18));
+  assert.equal(result.days[1].park.state, "closed");
+  assert.equal(result.days[1].recommendation.score, null);
+  assert.match(result.days[1].recommendation.headline, /zamknięty/);
+  assert.equal(result.visit.selectedDateKeys.includes("2026-07-14"), false);
+  assert.ok(result.visit.warnings.some((warning) => warning.includes("2026-07-14")));
+});
+
+test("przestarzały oficjalny kalendarz nie udaje potwierdzenia godzin ani zamknięcia", () => {
+  const weather = {
+    today: "2026-07-13",
+    tomorrow: "2026-07-14",
+    dayAfterTomorrow: "2026-07-15",
+    days: Object.fromEntries(["2026-07-13", "2026-07-14", "2026-07-15"].map((date) => [date, dryHours(date)])),
+    icm: { updatedAt: "2026-07-13T02:00:00.000Z" },
+    numericSourceCount: 3,
+  };
+  const parkCalendar = officialCalendar({
+    "2026-07-13": { status: "closed", opensAt: null, closesAt: null },
+    "2026-07-14": { opensAt: "11:30", closesAt: "18:30" },
+  }, "2026-07-10T07:00:00.000Z");
+
+  const result = assessThreeDayWeather(weather, {
+    now: new Date("2026-07-13T07:30:00.000Z"),
+    parkCalendar,
+  });
+
+  assert.equal(result.days[0].park.state, "unknown");
+  assert.notEqual(result.days[0].recommendation.score, null);
+  assert.equal(result.days[1].park.state, "unknown");
+  assert.ok(result.days[1].recommendation.hours.some((hour) => hour.hour === 10));
 });

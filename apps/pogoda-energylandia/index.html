@@ -11,7 +11,7 @@
       (() => {
         const canonicalPath = window.location.pathname.replace(/\/pogoda-energylandia\/?(?:index\.html)?$/, "/planer-energylandia/");
         const targetPath = canonicalPath === window.location.pathname ? "/zabhop/planer-energylandia/" : canonicalPath;
-        window.location.replace(`${targetPath}${window.location.search}`);
+        window.location.replace(`${targetPath}${window.location.search}${window.location.hash}`);
       })();
     </script>
   </head>

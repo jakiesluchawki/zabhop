@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AppleLogo,
   ArrowLeft,
@@ -30,19 +30,25 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
-import { ALL_ATTRACTIONS_BY_ID, RESTAURANTS, TOILETS, VERIFIED_AT } from "./extendedData.js";
+import { ALL_ATTRACTIONS, ALL_ATTRACTIONS_BY_ID, RESTAURANTS, TOILETS, VERIFIED_AT } from "./extendedData.js";
 import { detailsForAttraction } from "./details.js";
 import { createWalkingMapLinks } from "./mapNavigation.js";
+import { directionsForDay } from "./planDirections.js";
 import {
   attractionLabel,
   buildUniversalPlan,
   formatPlanTime,
   isGuardian,
+  resolveOfficialVisitWindow,
   timeToMinutes,
   zoneLabel,
 } from "./planner.js";
-import { PlannerMap } from "./PlannerMap.jsx";
 import { loadQueueTimes, queueForAttraction } from "./queues.js";
+import {
+  replacementOptionsForPlan,
+  replacementTargetForPlan,
+  replacePlannedAttraction,
+} from "./replacements.js";
 import { overlayShowsOnPlan } from "./showPlanner.js";
 import {
   createShortPlanLink,
@@ -76,8 +82,24 @@ import {
   QUICK_LOCATION_OPTIONS,
   TRACKING_LOCATION_OPTIONS,
 } from "./location.js";
-import { loadShowSchedule, OFFICIAL_SHOW_INDEX, showDateAvailability, showScheduleFreshness } from "./shows.js";
-import { loadAntistormNowcast, loadWeather, formatPolishDay } from "./weather.js";
+import {
+  loadShowSchedule,
+  mergeOfficialShowCalendar,
+  OFFICIAL_SHOW_INDEX,
+  showDateAvailability,
+  showScheduleFreshness,
+} from "./shows.js";
+import {
+  loadParkCalendar,
+  parkCalendarFreshness,
+  parkDayForDate,
+} from "./parkCalendar.js";
+import {
+  loadAntistormNowcast,
+  loadWeather,
+  formatPolishDay,
+  OFFICIAL_PARK_CALENDAR_URL,
+} from "./weather.js";
 import { assessThreeDayWeather } from "./weatherPlan.js";
 import { RainSafetyCard, WeatherStart } from "./WeatherStart.jsx";
 import { EntryStart } from "./EntryStart.jsx";
@@ -85,6 +107,25 @@ import { EntryStart } from "./EntryStart.jsx";
 const DRAFT_KEY = "energylandia-planner-v1:draft";
 const PLAN_KEY = "energylandia-planner-v1:plan";
 const COMPLETED_KEY = "energylandia-planner-v1:completed";
+const REJECTED_KEY = "energylandia-planner-v1:rejected";
+const QUEUE_REFRESH_INTERVAL_MS = 10 * 60_000;
+const SHOW_REFRESH_INTERVAL_MS = 30 * 60_000;
+const PARK_CALENDAR_REFRESH_INTERVAL_MS = 60 * 60_000;
+const FORECAST_REFRESH_INTERVAL_MS = 15 * 60_000;
+const NOWCAST_REFRESH_INTERVAL_MS = 5 * 60_000;
+const FOREGROUND_REFRESH_THRESHOLD_MS = 60_000;
+
+function MapUnavailableFallback() {
+  return (
+    <div className="planner-map" role="status" aria-label="Mapa chwilowo niedostępna">
+      <p className="location-message warning">Mapa jest chwilowo niedostępna. Plan, szczegóły atrakcji i nawigacja nadal działają.</p>
+    </div>
+  );
+}
+
+const PlannerMap = lazy(() => import("./PlannerMap.jsx")
+  .then((module) => ({ default: module.PlannerMap }))
+  .catch(() => ({ default: MapUnavailableFallback })));
 
 const STEP_LABELS = ["CZAS", "SKŁAD", "WZROST", "APETYT", "PODZIAŁ", "OBIAD", "PODSUMOWANIE"];
 const STEP_ILLUSTRATIONS = [
@@ -228,6 +269,10 @@ function completedNamespaceFor(plan) {
   return `${COMPLETED_KEY}:${day}:${party}`.slice(0, 240);
 }
 
+function rejectedNamespaceFor(plan) {
+  return completedNamespaceFor(plan).replace(COMPLETED_KEY, REJECTED_KEY);
+}
+
 function safeSanitizePlan(value) {
   try {
     return sanitizeSharedPlan(value);
@@ -242,6 +287,7 @@ function useUserLocation() {
   const watchRef = useRef(null);
   const positionRef = useRef(null);
   const requestRef = useRef(0);
+  const resumeTrackingRef = useRef(false);
 
   const clearTracking = useCallback(() => {
     if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
@@ -327,7 +373,7 @@ function useUserLocation() {
     let permission = null;
     const syncPermission = () => {
       if (cancelled || !permission) return;
-      if (permission.state === "granted") {
+      if (permission.state === "granted" && document.visibilityState !== "hidden") {
         if (watchRef.current == null) locate();
       } else if (permission.state === "denied") {
         requestRef.current += 1;
@@ -351,6 +397,21 @@ function useUserLocation() {
       requestRef.current += 1;
       clearTracking();
     };
+  }, [clearTracking, locate]);
+
+  useEffect(() => {
+    const syncVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        resumeTrackingRef.current = watchRef.current != null;
+        if (resumeTrackingRef.current) clearTracking();
+        return;
+      }
+      if (!resumeTrackingRef.current) return;
+      resumeTrackingRef.current = false;
+      locate();
+    };
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => document.removeEventListener("visibilitychange", syncVisibility);
   }, [clearTracking, locate]);
 
   return { position, status, locate };
@@ -451,7 +512,21 @@ function Welcome({ onStart, onBack, onResume, backLabel = "Wróć do początku" 
   );
 }
 
-function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatus, queueUpdatedAt, onRefreshQueues, generationError, weatherAssessment }) {
+function Onboarding({
+  profile,
+  setProfile,
+  step,
+  setStep,
+  onGenerate,
+  queueStatus,
+  queueUpdatedAt,
+  queueFreshnessState,
+  onRefreshQueues,
+  generationError,
+  weatherAssessment,
+  parkCalendar,
+  parkCalendarStatus,
+}) {
   const headingRef = useRef(null);
   const adults = countByRole(profile.members, "adult");
   const children = countByRole(profile.members, "child");
@@ -478,14 +553,46 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
   const arrivalMinutes = timeToMinutes(profile.arrivalTime, -1);
   const departureMinutes = timeToMinutes(profile.departureTime, -1);
   const visitTimeValid = arrivalMinutes >= 0 && departureMinutes >= arrivalMinutes + 60;
+  const officialVisitWindow = useMemo(
+    () => resolveOfficialVisitWindow(profile, parkCalendar),
+    [profile, parkCalendar],
+  );
+  const officiallyClosed = officialVisitWindow.state === "closed";
+  const officialOpening = officialVisitWindow.officialOpensAt || null;
+  const officialClosing = officialVisitWindow.officialClosesAt || null;
+  const officialOpeningMinutes = timeToMinutes(officialOpening, -1);
+  const officialClosingMinutes = timeToMinutes(officialClosing, -1);
+  const hasConfirmedHours = officialOpeningMinutes >= 0
+    && officialClosingMinutes > officialOpeningMinutes;
+  const insideOfficialHours = !hasConfirmedHours
+    || (
+      arrivalMinutes >= officialOpeningMinutes
+      && departureMinutes <= officialClosingMinutes
+    );
+  const selectedParkDay = officialVisitWindow.days?.[0] || null;
+  const selectedDayHasOfficialHours = selectedParkDay?.confirmed === true
+    && selectedParkDay.state === "open"
+    && selectedParkDay.opensAt
+    && selectedParkDay.closesAt;
+  const sharedWindowDiffers = profile.dayCount > 1
+    && selectedDayHasOfficialHours
+    && (
+      selectedParkDay.opensAt !== officialOpening
+      || selectedParkDay.closesAt !== officialClosing
+    );
+  const calendarFreshness = parkCalendarFreshness(parkCalendar);
   const mealMinutes = timeToMinutes(profile.meal?.time, -1);
   const mealTimeValid = profile.meal.mode === "none"
     || (mealMinutes >= arrivalMinutes && mealMinutes <= departureMinutes - 30);
   const effectiveSplitPolicy = guardians < 2 ? "never" : profile.splitPolicy;
-  const canContinue = (step !== 0 || visitTimeValid)
+  const canContinue = (step !== 0 || (visitTimeValid && !officiallyClosed && insideOfficialHours))
     && (step !== 2 || (heightsValid && agesValid && guardians >= 1))
     && (step !== 5 || mealTimeValid);
   const freshness = queueFreshness(queueUpdatedAt);
+  const queueIsUnconfirmed = queueFreshnessState === "stale"
+    || queueFreshnessState === "unknown"
+    || freshness.state === "stale"
+    || freshness.state === "unknown";
   const goToStep = useCallback((nextStep) => {
     setStep(Math.max(0, Math.min(STEP_LABELS.length - 1, nextStep)));
   }, [setStep]);
@@ -496,8 +603,43 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
   }, [step]);
 
   useEffect(() => {
+    if (officiallyClosed || !hasConfirmedHours || officialClosingMinutes - officialOpeningMinutes < 60) {
+      return;
+    }
+    setProfile((current) => {
+      const requestedArrival = timeToMinutes(current.arrivalTime, officialOpeningMinutes);
+      const requestedDeparture = timeToMinutes(current.departureTime, officialClosingMinutes);
+      const safeArrival = Math.min(
+        officialClosingMinutes - 60,
+        Math.max(officialOpeningMinutes, requestedArrival),
+      );
+      const safeDeparture = Math.min(
+        officialClosingMinutes,
+        Math.max(safeArrival + 60, requestedDeparture),
+      );
+      const arrivalTime = formatPlanTime(safeArrival);
+      const departureTime = formatPlanTime(safeDeparture);
+      return current.arrivalTime === arrivalTime && current.departureTime === departureTime
+        ? current
+        : { ...current, arrivalTime, departureTime };
+    });
+  }, [
+    hasConfirmedHours,
+    officialClosingMinutes,
+    officialOpeningMinutes,
+    officiallyClosed,
+    profile.dayCount,
+    profile.visitStartDate,
+    setProfile,
+  ]);
+
+  useEffect(() => {
     const nextIllustration = STEP_ILLUSTRATIONS[step + 1];
     if (!nextIllustration) return undefined;
+    const connection = navigator.connection;
+    if (connection?.saveData || /(?:^|-)2g$/.test(connection?.effectiveType || "")) {
+      return undefined;
+    }
     const preload = new Image();
     preload.src = `${import.meta.env.BASE_URL}assets/onboarding/${nextIllustration.file}`;
     return () => { preload.onload = null; };
@@ -542,11 +684,15 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
               ))}
             </div>
             <label className="single-date-field"><span>Od którego dnia</span><input type="date" value={profile.visitStartDate || ""} min={weatherAssessment?.days?.[0]?.dateKey || undefined} onChange={(event) => setProfile((current) => ({ ...current, visitStartDate: event.target.value || null }))} /></label>
+            {officiallyClosed && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>{officialVisitWindow.issues?.[0] || "Oficjalny kalendarz potwierdza, że park jest zamknięty w wybranym terminie."} Wybierz inny dzień lub skróć pobyt.</span></div>}
+            {!officiallyClosed && hasConfirmedHours && <p className="data-status" role="status"><span className="ready" />{selectedDayHasOfficialHours ? `Oficjalnie w pierwszym dniu: ${selectedParkDay.opensAt}–${selectedParkDay.closesAt}.` : `Potwierdzone okno wizyty: ${officialOpening}–${officialClosing}.`}{sharedWindowDiffers ? ` Wspólny plan: ${officialOpening}–${officialClosing}.` : ""} {calendarFreshness.label}. <a href={selectedParkDay?.sourceUrl || OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Źródło</a></p>}
+            {!officiallyClosed && !hasConfirmedHours && parkCalendarStatus !== "loading" && <p className="data-status" role="status"><span />Godziny otwarcia nie są potwierdzone. <a href={OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Sprawdź oficjalny kalendarz</a>.</p>}
             <div className="time-grid">
-              <label><span>Wchodzicie około</span><input type="time" value={profile.arrivalTime} onChange={(event) => setProfile((current) => ({ ...current, arrivalTime: event.target.value }))} /></label>
-              <label><span>Kończycie około</span><input type="time" value={profile.departureTime} onChange={(event) => setProfile((current) => ({ ...current, departureTime: event.target.value }))} /></label>
+              <label><span>Wchodzicie około</span><input type="time" min={hasConfirmedHours ? officialOpening : undefined} max={hasConfirmedHours ? officialClosing : undefined} value={profile.arrivalTime} onChange={(event) => setProfile((current) => ({ ...current, arrivalTime: event.target.value }))} /></label>
+              <label><span>Kończycie około</span><input type="time" min={hasConfirmedHours ? officialOpening : undefined} max={hasConfirmedHours ? officialClosing : undefined} value={profile.departureTime} onChange={(event) => setProfile((current) => ({ ...current, departureTime: event.target.value }))} /></label>
             </div>
             {!visitTimeValid && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>Godzina wyjścia musi być co najmniej godzinę po wejściu.</span></div>}
+            {visitTimeValid && !insideOfficialHours && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span>Wybrane godziny muszą mieścić się w oficjalnym oknie {officialOpening}–{officialClosing}.</span></div>}
           </>
         )}
 
@@ -665,7 +811,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
             </div>
             <button className="edit-review" type="button" onClick={() => goToStep(0)}><PencilSimple size={18} /> Popraw odpowiedzi</button>
             {generationError && <div className="warning-note" role="alert"><WarningCircle size={21} weight="fill" /><span><strong>Nie ma teraz bezpiecznej trasy dla tych ustawień.</strong><br />{generationError}</span></div>}
-            <p className="data-status" role="status"><span className={queueStatus === "ready" && freshness.state === "fresh" ? "ready" : ""} />{queueStatus === "loading" ? "Pobieram aktualne kolejki…" : queueStatus === "ready" ? `Migawka kolejek: ${freshness.label}${freshness.state === "stale" ? " — może być nieaktualna" : ""}.` : queueStatus === "stale" ? `Nie udało się odświeżyć; zachowuję ostatnią migawkę z ${freshness.label}.` : "Plan powstanie bez danych o kolejce."}</p>
+            <p className="data-status" role="status"><span className={queueStatus === "ready" && !queueIsUnconfirmed && freshness.state === "fresh" ? "ready" : ""} />{queueStatus === "loading" ? "Pobieram aktualne kolejki…" : queueStatus === "ready" ? `Migawka kolejek: ${freshness.label}${queueIsUnconfirmed ? " — dostępność i czasy nie są potwierdzone" : ""}.` : queueStatus === "stale" ? `Nie udało się odświeżyć; zachowuję ostatnią migawkę z ${freshness.label}.` : "Plan powstanie bez danych o kolejce."}</p>
             <button className="edit-review" type="button" disabled={queueStatus === "loading"} onClick={onRefreshQueues}><Clock size={18} /> Odśwież kolejki</button>
           </>
         )}
@@ -675,7 +821,7 @@ function Onboarding({ profile, setProfile, step, setStep, onGenerate, queueStatu
         {step < STEP_LABELS.length - 1 ? (
           <button className="primary-button" type="button" disabled={!canContinue} onClick={() => goToStep(step + 1)}>Dalej <ArrowRight size={20} weight="bold" /></button>
         ) : (
-          <button className="primary-button generate" type="button" onClick={onGenerate}><Sparkle size={20} weight="fill" /> Ułóż plan</button>
+          <button className="primary-button generate" type="button" disabled={officiallyClosed || !insideOfficialHours} onClick={onGenerate}><Sparkle size={20} weight="fill" /> Ułóż plan</button>
         )}
       </footer>
     </main>
@@ -748,6 +894,97 @@ function DetailSheet({ attraction, sequence, memberIds, members, onClose }) {
   );
 }
 
+function ReplacementSheet({
+  plan,
+  request,
+  queueById,
+  rejectedIds,
+  parkCalendar,
+  onReplace,
+  onClose,
+}) {
+  const sheetRef = useRef(null);
+  const closeRef = useRef(null);
+  const target = replacementTargetForPlan(plan, request);
+  const options = useMemo(
+    () => replacementOptionsForPlan(plan, request, {
+      queueById,
+      rejectedIds,
+      parkCalendar,
+    }),
+    [parkCalendar, plan, queueById, rejectedIds, request],
+  );
+
+  useLayoutEffect(() => {
+    const previouslyFocused = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    const sheet = sheetRef.current;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus({ preventScroll: true });
+    const handleKeys = (event) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !sheet) return;
+      const focusable = [...sheet.querySelectorAll('button:not([disabled]), [tabindex]:not([tabindex="-1"])')];
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      }
+      if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeys);
+    return () => {
+      document.removeEventListener("keydown", handleKeys);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus?.({ preventScroll: true });
+    };
+  }, [onClose]);
+
+  if (!target) return null;
+  const riders = plan.profile.members
+    .filter((member) => target.memberIds.includes(member.id))
+    .map(memberLabel)
+    .join(" · ");
+
+  return (
+    <div className="sheet-layer">
+      <div className="sheet-backdrop" onClick={onClose} aria-hidden="true" />
+      <section ref={sheetRef} className="detail-sheet replacement-sheet" role="dialog" aria-modal="true" aria-labelledby="replacement-title">
+        <div className="sheet-handle" />
+        <header><div><p className="eyebrow">TEN SAM BEZPIECZNY SLOT</p><h2 id="replacement-title">Wymień {target.attraction.name}</h2></div><button ref={closeRef} className="icon-button" type="button" onClick={onClose} aria-label="Zamknij"><X size={22} weight="bold" /></button></header>
+        <p className="replacement-intro">Gdy komuś nie podoba się motyw albo wygląd atrakcji, wybierzcie inną. Zmieniam tylko ten punkt — skład <strong>{riders}</strong>, obiad, bufory i godzina końca zostają bez zmian.</p>
+        {options.length > 0 ? (
+          <div className="replacement-options">
+            {options.map(({ attraction, queue, reason }) => (
+              <article key={attraction.id}>
+                <span className="replacement-mark"><ArrowClockwise size={20} weight="bold" /></span>
+                <div>
+                  <em>{zoneLabel(attraction.zone)}</em>
+                  <h3>{attraction.name}</h3>
+                  <p>{attractionLabel(attraction)}</p>
+                  <small>{reason}{queue?.freshness === "fresh" && Number.isFinite(queue.waitTime) ? ` · kolejka ${queue.waitTime} min` : ""}</small>
+                </div>
+                <button type="button" onClick={() => onReplace(attraction.id)}>Wybierz</button>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="replacement-empty"><WarningCircle size={24} weight="duotone" /><span><strong>Nie ma teraz uczciwego zamiennika blisko trasy.</strong><small>Nie proponujemy atrakcji ponad ograniczenia grupy ani takiej, która rozbije posiłek lub godzinę końca. Możesz wrócić i przeliczyć cały plan.</small></span></div>
+        )}
+        <p className="sheet-note">Odrzucona atrakcja nie wróci przy następnym przeliczeniu tego planu. Ostateczną decyzję o wejściu zawsze podejmuje obsługa.</p>
+      </section>
+    </div>
+  );
+}
+
 function annotatedDay(day) {
   let sequence = 0;
   return {
@@ -776,7 +1013,75 @@ function planMapItems(day) {
   });
 }
 
-const PRINT_DAY_ART = ["07-podsumowanie.jpg", "04-apetyt.jpg", "01-czas.jpg"];
+function printableMapItems(day) {
+  return day.steps.flatMap((step) => {
+    if (step.kind === "ride") {
+      const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId];
+      return ride ? [{ ...ride, marker: String(step.sequence), kind: "ride" }] : [];
+    }
+    if (step.kind === "split") {
+      return (step.assignments || []).flatMap((assignment, index) => {
+        const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId];
+        return ride ? [{ ...ride, marker: `${step.sequence}${index === 0 ? "A" : "B"}`, kind: "split" }] : [];
+      });
+    }
+    if (step.kind === "meal") {
+      const restaurant = RESTAURANTS.find((candidate) => candidate.id === step.restaurantId);
+      return restaurant ? [{ ...restaurant, marker: "O", kind: "meal" }] : [];
+    }
+    return [];
+  }).filter((item) => {
+    const latitude = Number(item.location?.lat ?? item.lat);
+    const longitude = Number(item.location?.lon ?? item.lon);
+    return Number.isFinite(latitude) && Number.isFinite(longitude);
+  });
+}
+
+function PrintableDayMap({ day, attractionCount }) {
+  const items = printableMapItems(day);
+  if (items.length < 2) {
+    return (
+      <figure className="pdf-day-hero">
+        <img src={`${import.meta.env.BASE_URL}assets/onboarding/07-podsumowanie.jpg`} alt="Filcowa mapa dnia" />
+        <figcaption><span><strong>{attractionCount}</strong> atrakcji</span><span><strong>~{day.stats.walkingMinutes}</strong> min marszu</span><span><strong>{day.stats.start}–{day.stats.end}</strong> pełny dzień</span></figcaption>
+      </figure>
+    );
+  }
+
+  const width = 650;
+  const height = 255;
+  const padding = 42;
+  const captionReserve = 58;
+  const latitudes = items.map((item) => Number(item.location?.lat ?? item.lat));
+  const longitudes = items.map((item) => Number(item.location?.lon ?? item.lon));
+  const minLatitude = Math.min(...latitudes);
+  const maxLatitude = Math.max(...latitudes);
+  const minLongitude = Math.min(...longitudes);
+  const maxLongitude = Math.max(...longitudes);
+  const points = items.map((item) => {
+    const latitude = Number(item.location?.lat ?? item.lat);
+    const longitude = Number(item.location?.lon ?? item.lon);
+    const x = padding + ((longitude - minLongitude) / Math.max(maxLongitude - minLongitude, 0.00001)) * (width - padding * 2);
+    const y = height - padding - captionReserve - ((latitude - minLatitude) / Math.max(maxLatitude - minLatitude, 0.00001)) * (height - padding * 2 - captionReserve);
+    return [Number(x.toFixed(1)), Number(y.toFixed(1))];
+  });
+
+  return (
+    <figure className="pdf-route-map">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Schemat kolejności punktów planu na podstawie ich położenia">
+        <defs><filter id={`route-shadow-${day.day}`} x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="3" stdDeviation="3" floodOpacity=".18" /></filter></defs>
+        <path className="pdf-map-contour one" d="M4 72C88 18 179 48 238 15s168 15 213 2 147 8 195 63v154H4Z" />
+        <path className="pdf-map-contour two" d="M0 187c105-42 159 29 260-4s170-1 223 23 116-2 167-36v85H0Z" />
+        <polyline className="pdf-map-route" points={points.map((point) => point.join(",")).join(" ")} />
+        {items.map((item, index) => {
+          const [x, y] = points[index];
+          return <g className={`pdf-map-marker ${item.kind}`} key={`${item.id}-${index}`} transform={`translate(${x} ${y})`} filter={`url(#route-shadow-${day.day})`}><circle r="18" /><text y="1">{item.marker}</text></g>;
+        })}
+      </svg>
+      <figcaption><span><strong>{attractionCount}</strong> atrakcji</span><span><strong>~{day.stats.walkingMinutes}</strong> min marszu</span><span><strong>{day.stats.start}–{day.stats.end}</strong> pełny dzień</span><small>Schemat kolejności; alejki w parku mogą prowadzić inaczej. O = obiad.</small></figcaption>
+    </figure>
+  );
+}
 
 function PrintablePlan({ plan, planUrl, preview = false }) {
   if (!plan) return null;
@@ -821,17 +1126,18 @@ function PrintablePlan({ plan, planUrl, preview = false }) {
         const day = annotatedDay(rawDay);
         const dateLabel = planDayDateLabel(plan, dayIndex, false);
         const attractionCount = day.steps.reduce((count, step) => count + (step.kind === "ride" ? 1 : step.kind === "split" ? step.assignments.length : 0), 0);
+        const directions = directionsForDay(day);
         return <section className="pdf-page pdf-day-page" key={day.day}>
           <header className="pdf-brandline"><span className="pdf-brand compact"><img src={`${import.meta.env.BASE_URL}icon-192-v3.png`} alt="" /><span><strong>PogodaPark</strong><small>PLAN DLA WAS</small></span></span><span className="pdf-edition">DZIEŃ {day.day ?? dayIndex + 1} Z {plan.days.length}</span></header>
           <div className="pdf-day-heading"><div><p>{dateLabel || `Dzień ${dayIndex + 1}`}</p><h2>{day.label || `Dzień ${dayIndex + 1}`}</h2></div><strong>{day.stats.start}<i>–</i>{day.stats.end}</strong></div>
-          <figure className="pdf-day-hero"><img src={`${import.meta.env.BASE_URL}assets/onboarding/${PRINT_DAY_ART[dayIndex % PRINT_DAY_ART.length]}`} alt="Filcowa mapa dnia" /><figcaption><span><strong>{attractionCount}</strong> atrakcji</span><span><strong>~{day.stats.walkingMinutes}</strong> min marszu</span><span><strong>{day.stats.start}–{day.stats.end}</strong> pełny dzień</span></figcaption></figure>
+          <PrintableDayMap day={day} attractionCount={attractionCount} />
           <div className="pdf-timeline">
             {day.steps.map((step) => {
-              if (step.kind === "meal") return <div className="pdf-step meal" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/06-obiad.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>OBIAD</small></strong><span><b>{step.title}</b><small>{step.description}</small></span></div>;
-              if (step.kind === "show") return <div className="pdf-step show" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/04-apetyt.jpg`} alt="" /><strong>{formatPlanTime(step.performanceStartMin)}<small>POKAZ • {step.durationMinutes} MIN</small></strong><span><b>{step.title}</b><small>{step.venue} · {step.description}</small></span></div>;
+              if (step.kind === "meal") return <div className="pdf-step meal" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/06-obiad.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>OBIAD</small></strong><span><b>{step.title}</b><small>{step.description}</small>{directions[step.id] && <small className="pdf-direction">{directions[step.id].copy}</small>}</span></div>;
+              if (step.kind === "show") return <div className="pdf-step show" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/04-apetyt.jpg`} alt="" /><strong>{formatPlanTime(step.performanceStartMin)}<small>POKAZ • {step.durationMinutes} MIN</small></strong><span><b>{step.title}</b><small>{step.venue} · {step.description}</small>{directions[step.id] && <small className="pdf-direction">{directions[step.id].copy}</small>}</span></div>;
               if (step.kind === "flex") return <div className="pdf-step flex" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/01-czas.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>DO {formatPlanTime(step.unplannedUntil ?? step.endMin)}</small></strong><span><b>{step.title}</b><small>{step.description}</small></span></div>;
-              if (step.kind === "ride") { const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId]; return <div className="pdf-step ride" key={step.id}><i>{step.sequence}</i><strong>{formatPlanTime(step.startMin)}<small>WSZYSCY</small></strong><span><b>{ride.name}</b><small>{zoneLabel(ride.zone)} · {attractionLabel(ride)}</small></span></div>; }
-              return <div className="pdf-step split" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/05-podzial.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>PODZIAŁ {step.sequence}</small></strong><span>{step.assignments.map((assignment) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; return <b key={assignment.attractionId}>{assignment.label}: {ride.name}<small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</small></b>; })}<em>Spotkanie {step.reunion.time}: {step.reunion.label}</em></span></div>;
+              if (step.kind === "ride") { const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId]; return <div className="pdf-step ride" key={step.id}><i>{step.sequence}</i><strong>{formatPlanTime(step.startMin)}<small>WSZYSCY</small></strong><span><b>{ride.name}</b><small>{zoneLabel(ride.zone)} · {attractionLabel(ride)}</small>{directions[step.id] && <small className="pdf-direction">{directions[step.id].copy}</small>}</span></div>; }
+              return <div className="pdf-step split" key={step.id}><img src={`${import.meta.env.BASE_URL}assets/onboarding/05-podzial.jpg`} alt="" /><strong>{formatPlanTime(step.startMin)}<small>PODZIAŁ {step.sequence}</small></strong><span>{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const direction = directions[`${step.id}:${index}`]; return <b key={assignment.attractionId}>{assignment.label}: {ride.name}<small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(", ")}</small>{direction && <small className="pdf-direction">{direction.copy}</small>}</b>; })}<em>Spotkanie {step.reunion.time}: {step.reunion.label}</em></span></div>;
             })}
           </div>
           <aside className="pdf-day-reminder"><strong>Bufor jest częścią planu.</strong><span>Jeśli atrakcje pójdą szybciej, wykorzystajcie wolny czas na WC, odpoczynek albo jedną z propozycji zapasowych — nie skracajcie dnia w ciemno.</span></aside>
@@ -889,6 +1195,16 @@ function ShowSchedulePanel({ plan, day, selectedDay, schedule, status, onRefresh
   const availableShows = availability.shows;
   const scheduledShow = day.steps.find((step) => step.kind === "show") ?? null;
   const sourceUrl = schedule?.source?.url || OFFICIAL_SHOW_INDEX;
+  const independentlyVerifiedDetails = schedule?.source?.status === "partial"
+    && Number.isFinite(Date.parse(schedule.source.detailsCheckedAt || ""));
+  const detailFreshness = independentlyVerifiedDetails
+    ? showScheduleFreshness({ source: { checkedAt: schedule.source.detailsCheckedAt, status: "fresh" } })
+    : null;
+  const sourceStatusLabel = independentlyVerifiedDetails
+    ? `Godziny: ${freshness.label}. Opisy i miejsca: ${detailFreshness.label} — nie wpisuję pokazów automatycznie.`
+    : freshness.state === "fresh"
+      ? freshness.label
+      : `${freshness.label} — nie wpisuję godzin automatycznie.`;
   const refreshLabel = status === "loading" ? "Odświeżam…" : "Odśwież terminarz";
   const selectedDateLabel = planDayDateLabel(plan, selectedDay, true) || (dateKey ? formatPolishDay(dateKey, true) : "wybrany dzień");
   const rangeLabel = availability.range
@@ -911,11 +1227,11 @@ function ShowSchedulePanel({ plan, day, selectedDay, schedule, status, onRefresh
       <p className="shows-intro">Nie układamy dnia wokół sceny. Gdy tego chcecie, używamy świeżego oficjalnego terminarza i proponujemy najwyżej jeden pokaz dopiero w końcowym buforze.</p>
       <div className={`shows-source ${freshness.state}`}>
         <span><CalendarBlank size={20} weight="duotone" /></span>
-        <p><strong>Oficjalny terminarz Energylandii</strong><small>{status === "loading" ? "Sprawdzam aktualną migawkę…" : freshness.state === "fresh" ? freshness.label : `${freshness.label} — nie wpisuję godzin automatycznie.`}</small></p>
+        <p><strong>Oficjalny terminarz Energylandii</strong><small>{status === "loading" ? "Sprawdzam aktualną migawkę…" : sourceStatusLabel}</small></p>
         <button type="button" onClick={onRefresh} disabled={status === "loading"}><ArrowClockwise className={status === "loading" ? "spin" : ""} size={18} weight="bold" /> <span>{refreshLabel}</span></button>
       </div>
       {!includeShows && <p className="shows-muted">Pokazy nie wejdą do trasy, ale kalendarz poniżej nadal możecie sprawdzić. Włącz „Dodaj”, jeśli planer ma pilnować terminów show.</p>}
-      {includeShows && freshness.state !== "fresh" && <p className="shows-warning"><WarningCircle size={18} weight="fill" /><span>Terminarz ma teraz status „{freshness.label}”, więc nie wpisujemy godzin automatycznie. Ostatnią opublikowaną rozpiskę nadal pokazujemy niżej — przed wyjściem sprawdź <a href={sourceUrl} target="_blank" rel="noreferrer">oficjalny terminarz</a> i tablice w parku.</span></p>}
+      {includeShows && freshness.state !== "fresh" && <p className="shows-warning"><WarningCircle size={18} weight="fill" /><span>{independentlyVerifiedDetails ? `Godziny pokazów pochodzą z aktualnego kalendarza, ale opisy i miejsca były ${detailFreshness.label}. Nie wpisujemy ich automatycznie do trasy.` : `Terminarz ma teraz status „${freshness.label}”, więc nie wpisujemy godzin automatycznie.`} Ostatnią opublikowaną rozpiskę nadal pokazujemy niżej — przed wyjściem sprawdź <a href={sourceUrl} target="_blank" rel="noreferrer">oficjalny terminarz</a> i tablice w parku.</span></p>}
       {includeShows && freshness.state === "fresh" && (
         <>
           {scheduledShow ? <article className="scheduled-show"><div><span className="show-time">{formatPlanTime(scheduledShow.performanceStartMin)}</span><p><small>WPISANE W KOŃCOWY BUFOR • {scheduledShow.durationMinutes} MIN</small><strong>{scheduledShow.title}</strong><em>{scheduledShow.venue}</em></p></div><a href={scheduledShow.officialUrl} target="_blank" rel="noreferrer">Oficjalny opis <CaretRight size={17} /></a></article> : <p className="shows-muted">Na {selectedDateLabel} nie ma jeszcze pokazu, który zmieści się bez naruszania atrakcji, obiadu i godzinnego buforu wyjścia. Niczego nie wciskamy na siłę.</p>}
@@ -961,17 +1277,40 @@ function SharedPlanStatus({ status, error, onRetry, onStart }) {
   );
 }
 
-function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weatherAssessment, weatherStatus, onRefreshWeather, showSchedule, showStatus, onRefreshShows, onToggleShows }) {
+function PlanView({
+  plan,
+  initialShortPlanUrl = "",
+  onEdit,
+  onReanalyze,
+  onReplaceAttraction,
+  weatherAssessment,
+  weatherStatus,
+  onRefreshWeather,
+  parkCalendar,
+  parkCalendarStatus,
+  queues,
+  queueStatus,
+  showSchedule,
+  showStatus,
+  onRefreshShows,
+  onToggleShows,
+}) {
   const planHeadingRef = useRef(null);
   const [selectedDay, setSelectedDay] = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [showToilets, setShowToilets] = useState(false);
   const { position, status: locationStatus, locate } = useUserLocation();
   const completedKey = useMemo(() => completedNamespaceFor(plan), [plan]);
+  const rejectedKey = useMemo(() => rejectedNamespaceFor(plan), [plan]);
   const [completedIds, setCompletedIds] = useState(() => {
     const stored = readStored(completedKey, []);
     return Array.isArray(stored) ? [...new Set(stored.filter((id) => ALL_ATTRACTIONS_BY_ID[id]))] : [];
   });
+  const [rejectedIds, setRejectedIds] = useState(() => {
+    const stored = readStored(rejectedKey, []);
+    return Array.isArray(stored) ? [...new Set(stored.filter((id) => ALL_ATTRACTIONS_BY_ID[id]))] : [];
+  });
+  const [replacementRequest, setReplacementRequest] = useState(null);
   const [email, setEmail] = useState("");
   const [notice, setNotice] = useState("");
   const [reanalyzing, setReanalyzing] = useState(false);
@@ -983,6 +1322,24 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
   const shareUrlRef = useRef(null);
   const shortLinkPromiseRef = useRef(null);
   const day = annotatedDay(plan.days[selectedDay] ?? plan.days[0] ?? { steps: [], stats: {} });
+  const queueById = useMemo(
+    () => Object.fromEntries(ALL_ATTRACTIONS.map((attraction) => [attraction.id, queueForAttraction(attraction, queues)])),
+    [queues],
+  );
+  const selectedVisitDate = offsetDateKey(plan.profile?.visitStartDate || warsawDateKey(), selectedDay);
+  const selectedParkDay = parkDayForDate(parkCalendar, selectedVisitDate);
+  const liveQueuesApplyToSelectedDay = selectedVisitDate === warsawDateKey();
+  const calendarFreshness = parkCalendarFreshness(parkCalendar);
+  const selectedDayOfficialHours = selectedParkDay.confirmed
+    && selectedParkDay.state === "open"
+    && selectedParkDay.opensAt
+    && selectedParkDay.closesAt;
+  const sharedPlanWindow = selectedDayOfficialHours
+    && plan.days.length > 1
+    && (
+      selectedParkDay.opensAt !== day.stats.start
+      || selectedParkDay.closesAt !== day.stats.end
+    );
   const mapItems = planMapItems(day);
   const compactPlanUrl = useMemo(() => createPlanUrl(plan), [plan]);
   const planUrl = shortPlanUrl || compactPlanUrl;
@@ -995,6 +1352,8 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
   const nextAttractionId = dayAttractionIds.find((id) => !completedIds.includes(id));
   const firstRide = ALL_ATTRACTIONS_BY_ID[nextAttractionId];
   const firstRideDistance = firstRide ? distanceCopy(position, firstRide) : null;
+  const firstRideQueue = firstRide ? queueForAttraction(firstRide, queues) : null;
+  const firstRideStep = day.steps.find((item) => item.kind === "ride" && item.attractionId === firstRide?.id);
   const isLocating = locationStatus === "loading" || locationStatus === "refreshing";
   const locationAccuracy = Number.isFinite(position?.accuracy) ? Math.round(position.accuracy) : null;
   const locationButtonLabel = isLocating
@@ -1004,6 +1363,28 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
         : "Włącz GPS";
   const completedToday = dayAttractionIds.filter((id) => completedIds.includes(id)).length;
   const queueSnapshot = queueFreshness(plan.queueSnapshotAt);
+  const latestQueueSnapshot = queueFreshness(queues?.updatedAt ?? null);
+  const planSnapshotTime = Number(plan.queueSnapshotAt);
+  const latestSnapshotTime = Number(queues?.updatedAt);
+  const newerQueueSnapshot = liveQueuesApplyToSelectedDay
+    && Number.isFinite(planSnapshotTime)
+    && planSnapshotTime > 0
+    && Number.isFinite(latestSnapshotTime)
+    && latestSnapshotTime > planSnapshotTime + 60_000;
+  const queueSnapshotUnconfirmed = queueSnapshot.state === "stale"
+    || queueSnapshot.state === "unknown"
+    || (
+      latestSnapshotTime === planSnapshotTime
+      && ["stale", "unknown"].includes(queues?.freshness)
+    );
+  const trustedFirstRideQueue = liveQueuesApplyToSelectedDay
+    && firstRideQueue?.freshness === "fresh"
+    && firstRideQueue?.stale !== true;
+  const nextRideUnavailable = trustedFirstRideQueue && firstRideQueue?.isOpen === false;
+  const nextRideQueueIncreased = trustedFirstRideQueue
+    && Number.isFinite(firstRideQueue?.waitTime)
+    && Number.isFinite(firstRideStep?.queueMinutes)
+    && firstRideQueue.waitTime >= firstRideStep.queueMinutes + 15;
   const selectedAttraction = selectedId ? ALL_ATTRACTIONS_BY_ID[selectedId] : null;
   const selectedMapItem = mapItems.find((item) => item.id === selectedId);
   const selectedAssignment = day.steps.flatMap((step) => {
@@ -1016,6 +1397,7 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
     planHeadingRef.current?.focus({ preventScroll: true });
   }, []);
   useEffect(() => writeStored(completedKey, completedIds), [completedIds, completedKey]);
+  useEffect(() => writeStored(rejectedKey, rejectedIds), [rejectedIds, rejectedKey]);
   useEffect(() => { if (notice) { const timeout = window.setTimeout(() => setNotice(""), 2400); return () => window.clearTimeout(timeout); } return undefined; }, [notice]);
   useEffect(() => setSelectedId(null), [selectedDay]);
   useEffect(() => {
@@ -1043,12 +1425,39 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
     setNotice(wasCompleted ? `Przywrócono: ${attraction?.name ?? "atrakcja"}` : `Zaliczone: ${attraction?.name ?? "atrakcja"}`);
   };
   const closeDetail = useCallback(() => setSelectedId(null), []);
+  const closeReplacement = useCallback(() => setReplacementRequest(null), []);
+  const handleReplace = (replacementId) => {
+    if (!replacementRequest) return;
+    const target = replacementTargetForPlan(plan, replacementRequest);
+    const nextRejectedIds = target
+      ? [...new Set([...rejectedIds, target.attraction.id])]
+      : rejectedIds;
+    try {
+      onReplaceAttraction(replacementRequest, replacementId, queueById);
+      setRejectedIds(nextRejectedIds);
+      if (target) setCompletedIds((current) => current.filter((id) => id !== target.attraction.id));
+      setReplacementRequest(null);
+      setNotice("Atrakcja wymieniona — godziny, obiad i bezpieczeństwo zostały zachowane");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Nie udało się bezpiecznie wymienić atrakcji");
+    }
+  };
   const handleReanalyze = async () => {
     if (reanalyzing) return;
     setReanalyzing(true);
     try {
-      await onReanalyze();
-      setNotice("Plan przeliczony na świeżych kolejkach");
+      const result = await onReanalyze(position, rejectedIds);
+      if (result?.status === "updated" && result.freshness === "fresh") {
+        setNotice("Plan przeliczony na świeżych kolejkach");
+      } else if (result?.status === "updated") {
+        setNotice("Plan przeliczony — kolejki mogą być nieaktualne");
+      } else if (result?.status === "retained") {
+        setNotice("Nie udało się odświeżyć; użyłem ostatniej migawki");
+      } else {
+        setNotice("Plan bez potwierdzonych, aktualnych kolejek");
+      }
+    } catch {
+      setNotice("Nie udało się bezpiecznie przeliczyć planu");
     } finally {
       setReanalyzing(false);
     }
@@ -1122,12 +1531,15 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
       <main className="plan-shell screen-app">
         <header className="plan-topbar"><div><p className="eyebrow">PLAN DLA WAS</p><h1 ref={planHeadingRef} tabIndex="-1">Wasza Energylandia</h1></div><div className="plan-topbar-actions"><button type="button" onClick={handleReanalyze} disabled={reanalyzing}><ArrowClockwise className={reanalyzing ? "spin" : ""} size={17} /> {reanalyzing ? "Liczę…" : "Przelicz"}</button><button type="button" onClick={onEdit}><PencilSimple size={17} /> Zmień</button></div></header>
         {!plan.safety?.valid && <div className="safety-alert"><WarningCircle size={22} weight="fill" /><span><strong>Plan wymaga poprawy</strong><small>{plan.safety?.issues?.[0]}</small></span></div>}
+        {selectedParkDay.state === "closed" && <div className="safety-alert"><WarningCircle size={22} weight="fill" /><span><strong>Park jest zamknięty w tym dniu</strong><small>Oficjalny kalendarz potwierdza zamknięcie. Zmień datę wizyty przed wyjazdem.</small></span></div>}
         <RainSafetyCard assessment={weatherAssessment} status={weatherStatus} onRefresh={onRefreshWeather} compact />
         <section className="plan-hero" aria-live="polite">
           <p>DZIEŃ {day.day ?? selectedDay + 1} Z {plan.days.length} • {plan.profile.members.length} OSÓB</p>
           <h2>{firstRide ? <>{completedToday > 0 ? "Teraz czas na" : "Zacznijcie od"}<br /><em>{firstRide.name}</em></> : `Dzień ${day.day ?? selectedDay + 1} zaliczony`}</h2>
           <span>{firstRide ? "Najpierw bezpieczeństwo, potem zgodność z waszym apetytem, kolejki i logiczny marsz." : "Wszystkie atrakcje zaplanowane na ten dzień są już oznaczone jako zaliczone."}</span>
           {firstRideDistance && <small className="hero-distance"><Footprints size={16} weight="duotone" /> <strong>Od was:</strong> {firstRideDistance}</small>}
+          {nextRideUnavailable && <p className="location-message warning" role="status">Ostatnia potwierdzona migawka wskazuje, że {firstRide.name} może być chwilowo niedostępna. Przelicz trasę przed dojściem.</p>}
+          {!nextRideUnavailable && nextRideQueueIncreased && <p className="location-message warning" role="status">Kolejka do {firstRide.name} wzrosła do około {firstRideQueue.waitTime} min. Warto przeliczyć kolejność zwiedzania.</p>}
           {firstRide && !firstRideDistance && locationStatus !== "denied" && locationStatus !== "unsupported" && <button className="hero-location-button" type="button" onClick={locate} disabled={isLocating}><Crosshair size={18} weight="bold" /><span><strong>{isLocating ? "Szukam waszej pozycji…" : locationStatus === "timeout" || locationStatus === "error" ? "Spróbuj ustalić pozycję" : "Włącz lokalizację"}</strong><small>{isLocating ? "Za chwilę pokażę metry do każdej atrakcji." : "Pokażę metry i czas dojścia do każdej atrakcji."}</small></span></button>}
           {firstRide && <button className="hero-next-button" type="button" aria-haspopup="dialog" onClick={() => setSelectedId(firstRide.id)}>Opis i prowadzenie <CaretRight size={18} /></button>}
         </section>
@@ -1135,7 +1547,9 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
 
         <section className="plan-map-card" aria-labelledby="map-title">
           <div className="section-heading"><div><p className="eyebrow">TRASA NA DZISIAJ</p><h2 id="map-title">Mapa dnia</h2></div><div className="map-controls"><button type="button" className={`location-control ${position ? "active" : ""}`} onClick={locate} disabled={isLocating} aria-label={`${locationButtonLabel}. Pokaż odległości od aktualnej pozycji.`}><Crosshair size={18} weight="bold" /> {locationButtonLabel}</button><button type="button" className={showToilets ? "active" : ""} aria-pressed={showToilets} onClick={() => setShowToilets((value) => !value)}><Toilet size={18} weight="fill" /> WC</button></div></div>
-          <PlannerMap items={mapItems} toilets={TOILETS} completedIds={completedIds} selectedId={selectedId} position={position} showToilets={showToilets} onSelect={(ride) => setSelectedId(ride.id)} />
+          <Suspense fallback={<div className="planner-map" role="status" aria-label="Ładuję mapę Energylandii" />}>
+            <PlannerMap items={mapItems} toilets={TOILETS} completedIds={completedIds} selectedId={selectedId} position={position} showToilets={showToilets} onSelect={(ride) => setSelectedId(ride.id)} />
+          </Suspense>
           {locationStatus === "idle" && <p className="location-message">Włącz GPS, aby zobaczyć w planie metry i orientacyjny czas dojścia od was do każdej atrakcji.</p>}
           {isLocating && <p className="location-message" role="status">Ustalam pozycję telefonu. Gdy ją złapię, odległości pojawią się przy każdej atrakcji.</p>}
           {locationStatus === "ready" && <p className="location-message location-ready" role="status"><Crosshair size={15} weight="fill" /> GPS włączony — odległości w planie są liczone od waszej aktualnej pozycji{locationAccuracy ? ` (dokł. około ±${locationAccuracy} m)` : ""}.</p>}
@@ -1144,10 +1558,12 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
           {locationStatus === "denied" && <p className="location-message warning" role="status">Lokalizacja jest zablokowana. Włącz ją dla tej strony w ustawieniach przeglądarki, aby zobaczyć metry w planie.</p>}
           {locationStatus === "unsupported" && <p className="location-message warning" role="status">Ta przeglądarka nie udostępnia lokalizacji, więc nie pokażemy uczciwych odległości od was.</p>}
           <div className="day-stats"><span><Clock size={16} /> {day.stats.start}–{day.stats.end}</span><span><MapTrifold size={16} /> ~{day.stats.walkingMinutes} min marszu</span><span><CheckCircle size={16} /> {completedToday}/{dayAttractionIds.length}</span></div>
-          <p className="queue-snapshot">Kolejki: {queueSnapshot.label}{queueSnapshot.state === "stale" ? " — traktuj jako orientacyjne" : ""}.</p>
+          {selectedDayOfficialHours && <p className="queue-snapshot">Oficjalne godziny tego dnia: {selectedParkDay.opensAt}–{selectedParkDay.closesAt} · {calendarFreshness.label}.{sharedPlanWindow ? ` Wspólny plan wszystkich dni: ${day.stats.start}–${day.stats.end}.` : ""} <a href={selectedParkDay.sourceUrl || OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Kalendarz parku</a>.</p>}
+          {selectedParkDay.state === "unknown" && parkCalendarStatus !== "loading" && <p className="queue-snapshot">Godziny działania w tym dniu nie są potwierdzone. <a href={OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Sprawdź oficjalny kalendarz parku</a>.</p>}
+          <p className="queue-snapshot">{liveQueuesApplyToSelectedDay ? <>Plan oparty na kolejkach: {queueSnapshot.label}{queueSnapshotUnconfirmed ? " — bez potwierdzenia dostępności atrakcji" : ""}.{queueStatus === "stale" ? " Nie udało się pobrać nowszej migawki." : newerQueueSnapshot ? ` Dostępna nowsza migawka (${latestQueueSnapshot.label}) — przelicz plan.` : ""}</> : "Dla przyszłego dnia nie udajemy dzisiejszych kolejek ani dostępności atrakcji."}</p>
         </section>
 
-        <ShowSchedulePanel plan={plan} day={day} selectedDay={selectedDay} schedule={showSchedule} status={showStatus} onRefresh={onRefreshShows} onToggle={onToggleShows} />
+        <ShowSchedulePanel plan={plan} day={day} selectedDay={selectedDay} schedule={showSchedule} status={showStatus} onRefresh={() => onRefreshShows(rejectedIds)} onToggle={(includeShows) => onToggleShows(includeShows, rejectedIds)} />
 
         <section className="timeline-section" aria-labelledby="timeline-title">
           <div className="section-heading"><div><p className="eyebrow">PO KOLEI, BEZ CHAOSU</p><h2 id="timeline-title">Plan dnia</h2></div></div>
@@ -1160,9 +1576,9 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
                 const ride = ALL_ATTRACTIONS_BY_ID[step.attractionId];
                 const completed = completedIds.includes(ride.id);
                 const liveDistance = distanceCopy(position, ride);
-                return <article className={`timeline-ride ${completed ? "completed" : ""}`} key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><button className="ride-content" type="button" onClick={() => setSelectedId(ride.id)}><span className="route-number">{step.sequence}</span><span><em>WSZYSCY • {zoneLabel(ride.zone)}</em><h3>{ride.name}</h3><p>{attractionLabel(ride)}{Number.isFinite(step.queueMinutes) ? ` · kolejka ${step.queueMinutes} min` : ""}</p>{liveDistance && <small className="distance-meta" aria-label={`Odległość od was: ${liveDistance}`}><Footprints size={13} weight="duotone" /> <span>OD WAS</span> · {liveDistance}</small>}</span><CaretRight size={18} /></button><button className="complete-button" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={24} weight={completed ? "fill" : "regular"} /></button></article>;
+                return <article className={`timeline-ride ${completed ? "completed" : ""}`} key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><button className="ride-content" type="button" onClick={() => setSelectedId(ride.id)}><span className="route-number">{step.sequence}</span><span><em>WSZYSCY • {zoneLabel(ride.zone)}</em><h3>{ride.name}</h3><p>{attractionLabel(ride)}{Number.isFinite(step.queueMinutes) ? ` · kolejka ${step.queueMinutes} min` : ""}</p>{liveDistance && <small className="distance-meta" aria-label={`Odległość od was: ${liveDistance}`}><Footprints size={13} weight="duotone" /> <span>OD WAS</span> · {liveDistance}</small>}</span><CaretRight size={18} /></button><div className="ride-actions"><button className="replace-button" type="button" aria-label={`Wymień atrakcję: ${ride.name}`} title="Wymień tę atrakcję" onClick={() => setReplacementRequest({ dayIndex: selectedDay, stepId: step.id })}><ArrowClockwise size={19} weight="bold" /></button><button className="complete-button" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={23} weight={completed ? "fill" : "regular"} /></button></div></article>;
               }
-              return <article className="timeline-split" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="split-heading"><span className="route-number">{step.sequence}</span><div><em>PODZIAŁ GRUPY</em><h3>Dwie dobre trasy obok siebie</h3></div></div><div className="split-assignments">{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const completed = completedIds.includes(ride.id); const liveDistance = distanceCopy(position, ride); return <div className={completed ? "completed" : ""} key={assignment.attractionId}><button className="split-detail" type="button" onClick={() => setSelectedId(ride.id)}><span>{step.sequence}{index === 0 ? "A" : "B"}</span><div><em>{assignment.label}</em><strong>{ride.name}</strong><small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(" · ")}</small>{liveDistance && <small className="distance-meta" aria-label={`Odległość od was: ${liveDistance}`}><Footprints size={13} weight="duotone" /> <span>OD WAS</span> · {liveDistance}</small>}</div><CaretRight size={17} /></button><button className="split-complete" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={22} weight={completed ? "fill" : "regular"} /></button></div>; })}</div><p className="reunion"><MapPin size={16} weight="fill" /><span><strong>{step.reunion.time}</strong> · {step.reunion.label}</span></p></article>;
+              return <article className="timeline-split" key={step.id}><span className="timeline-time">{formatPlanTime(step.startMin)}</span><div className="split-heading"><span className="route-number">{step.sequence}</span><div><em>PODZIAŁ GRUPY</em><h3>Dwie dobre trasy obok siebie</h3></div></div><div className="split-assignments">{step.assignments.map((assignment, index) => { const ride = ALL_ATTRACTIONS_BY_ID[assignment.attractionId]; const completed = completedIds.includes(ride.id); const liveDistance = distanceCopy(position, ride); return <div className={completed ? "completed" : ""} key={assignment.attractionId}><button className="split-detail" type="button" onClick={() => setSelectedId(ride.id)}><span>{step.sequence}{index === 0 ? "A" : "B"}</span><div><em>{assignment.label}</em><strong>{ride.name}</strong><small>{assignment.memberIds.map((id) => memberLabel(plan.profile.members.find((member) => member.id === id))).join(" · ")}</small>{liveDistance && <small className="distance-meta" aria-label={`Odległość od was: ${liveDistance}`}><Footprints size={13} weight="duotone" /> <span>OD WAS</span> · {liveDistance}</small>}</div><CaretRight size={17} /></button><div className="split-actions"><button className="split-replace" type="button" aria-label={`Wymień atrakcję: ${ride.name}`} title="Wymień tę atrakcję" onClick={() => setReplacementRequest({ dayIndex: selectedDay, stepId: step.id, assignmentIndex: index })}><ArrowClockwise size={18} weight="bold" /></button><button className="split-complete" type="button" aria-pressed={completed} aria-label={`${completed ? "Cofnij zaliczenie" : "Oznacz jako zaliczoną"}: ${ride.name}`} onClick={() => toggleCompleted(ride.id)}><CheckCircle size={21} weight={completed ? "fill" : "regular"} /></button></div></div>; })}</div><p className="reunion"><MapPin size={16} weight="fill" /><span><strong>{step.reunion.time}</strong> · {step.reunion.label}</span></p></article>;
             })}
           </div>
         </section>
@@ -1185,6 +1601,7 @@ function PlanView({ plan, initialShortPlanUrl = "", onEdit, onReanalyze, weather
       </main>
       {showPdfPreview && <PdfPreview plan={plan} planUrl={planUrl} onClose={() => setShowPdfPreview(false)} />}
       {selectedAttraction && <DetailSheet attraction={selectedAttraction} sequence={selectedAssignment.sequence} memberIds={selectedAssignment.memberIds} members={plan.profile.members} onClose={closeDetail} />}
+      {replacementRequest && <ReplacementSheet plan={plan} request={replacementRequest} queueById={queueById} rejectedIds={rejectedIds} parkCalendar={parkCalendar} onReplace={handleReplace} onClose={closeReplacement} />}
     </>
   );
 }
@@ -1211,13 +1628,32 @@ export function App() {
   const [queueStatus, setQueueStatus] = useState("loading");
   const [showSchedule, setShowSchedule] = useState(null);
   const [showStatus, setShowStatus] = useState("loading");
+  const [parkCalendar, setParkCalendar] = useState(null);
+  const [parkCalendarStatus, setParkCalendarStatus] = useState("loading");
   const [generationError, setGenerationError] = useState("");
   const [weather, setWeather] = useState(null);
   const [weatherStatus, setWeatherStatus] = useState("loading");
   const [weatherClock, setWeatherClock] = useState(() => Date.now());
   const queuesRef = useRef(null);
+  const queueRequestRef = useRef(null);
+  const lastQueueRequestAtRef = useRef(0);
   const showScheduleRef = useRef(null);
+  const showRequestRef = useRef(null);
+  const lastShowRequestAtRef = useRef(0);
+  const parkCalendarRef = useRef(null);
+  const parkCalendarRequestRef = useRef(null);
+  const lastParkCalendarRequestAtRef = useRef(0);
   const weatherRef = useRef(null);
+  const lastGoodWeatherRef = useRef(null);
+  const weatherRequestRef = useRef(null);
+  const antistormRequestRef = useRef(null);
+  const lastWeatherRequestAtRef = useRef(0);
+  const lastAntistormRequestAtRef = useRef(0);
+  const sharedPlanReady = !shortHashPresent || shortLinkDismissed || Boolean(plan);
+  const needsQueues = sharedPlanReady && (screen === "onboarding" || screen === "plan");
+  const needsShows = sharedPlanReady && (screen === "plan" || (screen === "onboarding" && profile.entertainment?.includeShows === true));
+  const needsWeather = sharedPlanReady && (screen === "weather" || screen === "onboarding" || screen === "plan");
+  const needsParkCalendar = needsWeather;
 
   useEffect(() => writeStored(DRAFT_KEY, profile), [profile]);
   useEffect(() => {
@@ -1241,108 +1677,326 @@ export function App() {
       });
     return () => { cancelled = true; };
   }, [shortHashPresent, shortLinkDismissed, shortPlanLoadAttempt, shortPlanToken]);
-  const refreshQueues = useCallback(async (signal) => {
-    setQueueStatus("loading");
+  const refreshQueues = useCallback(async (signal, { quiet = false } = {}) => {
+    const pending = queueRequestRef.current;
+    if (pending && !pending.signal?.aborted) return pending.promise;
+    if (!quiet || !queuesRef.current) setQueueStatus("loading");
+    lastQueueRequestAtRef.current = Date.now();
+    const task = (async () => {
+      try {
+        const data = await loadQueueTimes(signal);
+        queuesRef.current = data;
+        setQueues(data);
+        setQueueStatus("ready");
+        return data;
+      } catch (error) {
+        if (error?.name !== "AbortError") setQueueStatus(queuesRef.current ? "stale" : "error");
+        return null;
+      }
+    })();
+    queueRequestRef.current = { promise: task, signal };
     try {
-      const data = await loadQueueTimes(signal);
-      queuesRef.current = data;
-      setQueues(data);
-      setQueueStatus("ready");
-      return data;
-    } catch (error) {
-      if (error?.name !== "AbortError") setQueueStatus(queuesRef.current ? "stale" : "error");
-      return null;
+      return await task;
+    } finally {
+      if (queueRequestRef.current?.promise === task) queueRequestRef.current = null;
     }
   }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    refreshQueues(controller.signal);
-    return () => controller.abort();
-  }, [refreshQueues]);
 
-  const refreshShows = useCallback(async (signal) => {
-    setShowStatus("loading");
+  useEffect(() => {
+    if (!needsQueues) return undefined;
+    const controller = new AbortController();
+    const update = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshQueues(controller.signal, { quiet: Boolean(queuesRef.current) });
+    };
+    const onForeground = () => {
+      if (
+        document.visibilityState !== "hidden"
+        && Date.now() - lastQueueRequestAtRef.current >= FOREGROUND_REFRESH_THRESHOLD_MS
+      ) update();
+    };
+    if (!queuesRef.current || Date.now() - lastQueueRequestAtRef.current >= FOREGROUND_REFRESH_THRESHOLD_MS) {
+      update();
+    }
+    const interval = window.setInterval(update, QUEUE_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onForeground);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onForeground);
+    };
+  }, [needsQueues, refreshQueues]);
+
+  const refreshParkCalendar = useCallback(async (signal, { quiet = false } = {}) => {
+    const pending = parkCalendarRequestRef.current;
+    if (pending && !pending.signal?.aborted) return pending.promise;
+    if (!quiet || !parkCalendarRef.current) setParkCalendarStatus("loading");
+    lastParkCalendarRequestAtRef.current = Date.now();
+    const task = (async () => {
+      try {
+        const data = await loadParkCalendar(signal);
+        parkCalendarRef.current = data;
+        setParkCalendar(data);
+        setParkCalendarStatus(parkCalendarFreshness(data).state === "fresh" ? "ready" : "stale");
+        return data;
+      } catch (error) {
+        if (error?.name !== "AbortError") setParkCalendarStatus(parkCalendarRef.current ? "stale" : "error");
+        return null;
+      }
+    })();
+    parkCalendarRequestRef.current = { promise: task, signal };
     try {
-      const data = await loadShowSchedule(signal);
-      showScheduleRef.current = data;
-      setShowSchedule(data);
-      setShowStatus("ready");
-      return data;
-    } catch (error) {
-      if (error?.name !== "AbortError") setShowStatus(showScheduleRef.current ? "stale" : "error");
-      return null;
+      return await task;
+    } finally {
+      if (parkCalendarRequestRef.current?.promise === task) parkCalendarRequestRef.current = null;
     }
   }, []);
+
   useEffect(() => {
+    if (!needsParkCalendar) return undefined;
     const controller = new AbortController();
-    refreshShows(controller.signal);
-    return () => controller.abort();
-  }, [refreshShows]);
+    const update = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshParkCalendar(controller.signal, { quiet: Boolean(parkCalendarRef.current) });
+    };
+    const onForeground = () => {
+      if (
+        document.visibilityState !== "hidden"
+        && Date.now() - lastParkCalendarRequestAtRef.current >= PARK_CALENDAR_REFRESH_INTERVAL_MS
+      ) update();
+    };
+    if (
+      !parkCalendarRef.current
+      || Date.now() - lastParkCalendarRequestAtRef.current >= PARK_CALENDAR_REFRESH_INTERVAL_MS
+    ) update();
+    const interval = window.setInterval(update, PARK_CALENDAR_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onForeground);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onForeground);
+    };
+  }, [needsParkCalendar, refreshParkCalendar]);
+
+  const refreshShows = useCallback(async (signal, { quiet = false } = {}) => {
+    const pending = showRequestRef.current;
+    if (pending && !pending.signal?.aborted) return pending.promise;
+    if (!quiet || !showScheduleRef.current) setShowStatus("loading");
+    lastShowRequestAtRef.current = Date.now();
+    const task = (async () => {
+      try {
+        const data = await loadShowSchedule(signal);
+        showScheduleRef.current = data;
+        setShowSchedule(data);
+        setShowStatus("ready");
+        return data;
+      } catch (error) {
+        if (error?.name !== "AbortError") setShowStatus(showScheduleRef.current ? "stale" : "error");
+        return null;
+      }
+    })();
+    showRequestRef.current = { promise: task, signal };
+    try {
+      return await task;
+    } finally {
+      if (showRequestRef.current?.promise === task) showRequestRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!needsShows) return undefined;
+    const controller = new AbortController();
+    const update = () => {
+      if (document.visibilityState === "hidden") return;
+      refreshShows(controller.signal, { quiet: Boolean(showScheduleRef.current) });
+    };
+    const onForeground = () => {
+      if (
+        document.visibilityState !== "hidden"
+        && Date.now() - lastShowRequestAtRef.current >= SHOW_REFRESH_INTERVAL_MS
+      ) update();
+    };
+    if (!showScheduleRef.current || Date.now() - lastShowRequestAtRef.current >= SHOW_REFRESH_INTERVAL_MS) {
+      update();
+    }
+    const interval = window.setInterval(update, SHOW_REFRESH_INTERVAL_MS);
+    document.addEventListener("visibilitychange", onForeground);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onForeground);
+    };
+  }, [needsShows, refreshShows]);
 
   const refreshWeather = useCallback(async () => {
-    setWeatherStatus(weatherRef.current ? "refreshing" : "loading");
+    if (weatherRequestRef.current) return weatherRequestRef.current;
+    setWeatherStatus(lastGoodWeatherRef.current ? "refreshing" : "loading");
+    lastWeatherRequestAtRef.current = Date.now();
+    const task = (async () => {
+      try {
+        const nextWeather = await loadWeather();
+        if (
+          nextWeather?.forecastStatus !== "ready"
+          || !Number.isFinite(nextWeather.numericSourceCount)
+          || nextWeather.numericSourceCount < 1
+        ) {
+          const previous = lastGoodWeatherRef.current;
+          const retainedWeather = previous ? {
+            ...previous,
+            antistorm: nextWeather.antistorm || previous.antistorm,
+            sources: nextWeather.sources || previous.sources,
+            numericSourceCount: nextWeather.numericSourceCount,
+            availableSourceCount: nextWeather.availableSourceCount,
+            checkedAt: nextWeather.checkedAt,
+            forecastStatus: "unavailable",
+          } : nextWeather;
+          weatherRef.current = retainedWeather;
+          setWeather(retainedWeather);
+          setWeatherClock(Date.now());
+          setWeatherStatus(previous ? "stale" : "error");
+          return null;
+        }
+        weatherRef.current = nextWeather;
+        lastGoodWeatherRef.current = nextWeather;
+        lastAntistormRequestAtRef.current = nextWeather.antistorm ? Date.now() : 0;
+        setWeather(nextWeather);
+        setWeatherClock(Date.now());
+        setWeatherStatus("ready");
+        return nextWeather;
+      } catch {
+        setWeatherStatus(lastGoodWeatherRef.current ? "stale" : "error");
+        return null;
+      }
+    })();
+    weatherRequestRef.current = task;
     try {
-      const nextWeather = await loadWeather();
-      weatherRef.current = nextWeather;
-      setWeather(nextWeather);
-      setWeatherClock(Date.now());
-      setWeatherStatus("ready");
-      return nextWeather;
-    } catch {
-      setWeatherStatus(weatherRef.current ? "stale" : "error");
-      return null;
+      return await task;
+    } finally {
+      if (weatherRequestRef.current === task) weatherRequestRef.current = null;
     }
   }, []);
 
   const refreshAntistorm = useCallback(async () => {
     if (!weatherRef.current) return null;
+    if (antistormRequestRef.current) return antistormRequestRef.current;
+    lastAntistormRequestAtRef.current = Date.now();
+    const task = (async () => {
+      try {
+        const antistorm = await loadAntistormNowcast();
+        const nextWeather = {
+          ...weatherRef.current,
+          antistorm,
+          sources: (weatherRef.current.sources || []).map((source) => source.name === "Antistorm" ? {
+            ...source,
+            status: "ok",
+            detail: `Nowcast co 15 min • ${antistorm.m || "najbliższy punkt"}`,
+            updatedAt: antistorm.updatedAt,
+          } : source),
+        };
+        weatherRef.current = nextWeather;
+        if (lastGoodWeatherRef.current) {
+          lastGoodWeatherRef.current = { ...lastGoodWeatherRef.current, antistorm };
+        }
+        setWeather(nextWeather);
+        setWeatherClock(Date.now());
+        return antistorm;
+      } catch {
+        return null;
+      }
+    })();
+    antistormRequestRef.current = task;
     try {
-      const antistorm = await loadAntistormNowcast();
-      const nextWeather = {
-        ...weatherRef.current,
-        antistorm,
-        sources: (weatherRef.current.sources || []).map((source) => source.name === "Antistorm" ? {
-          ...source,
-          status: "ok",
-          detail: `Nowcast co 15 min • ${antistorm.m || "najbliższy punkt"}`,
-          updatedAt: antistorm.updatedAt,
-        } : source),
-      };
-      weatherRef.current = nextWeather;
-      setWeather(nextWeather);
-      setWeatherClock(Date.now());
-      return antistorm;
-    } catch {
-      return null;
+      return await task;
+    } finally {
+      if (antistormRequestRef.current === task) antistormRequestRef.current = null;
     }
   }, []);
 
   useEffect(() => {
-    refreshWeather();
-    const fullForecastInterval = window.setInterval(refreshWeather, 15 * 60_000);
-    const nowcastInterval = window.setInterval(refreshAntistorm, 5 * 60_000);
-    const clockInterval = window.setInterval(() => setWeatherClock(Date.now()), 60_000);
+    if (!needsWeather) return undefined;
+    const refreshVisibleForecast = () => {
+      if (document.visibilityState === "hidden") return;
+      const now = Date.now();
+      const forecastAge = now - lastWeatherRequestAtRef.current;
+      if (
+        !weatherRef.current
+        || forecastAge >= FORECAST_REFRESH_INTERVAL_MS
+        || (!lastGoodWeatherRef.current && forecastAge >= FOREGROUND_REFRESH_THRESHOLD_MS)
+      ) {
+        refreshWeather();
+      } else if (now - lastAntistormRequestAtRef.current >= NOWCAST_REFRESH_INTERVAL_MS) {
+        refreshAntistorm();
+      }
+      setWeatherClock(now);
+    };
+    const refreshVisibleNowcast = () => {
+      if (document.visibilityState !== "hidden") refreshAntistorm();
+    };
+    refreshVisibleForecast();
+    const fullForecastInterval = window.setInterval(refreshVisibleForecast, FORECAST_REFRESH_INTERVAL_MS);
+    const nowcastInterval = window.setInterval(refreshVisibleNowcast, NOWCAST_REFRESH_INTERVAL_MS);
+    const clockInterval = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") setWeatherClock(Date.now());
+    }, 60_000);
+    document.addEventListener("visibilitychange", refreshVisibleForecast);
     return () => {
       window.clearInterval(fullForecastInterval);
       window.clearInterval(nowcastInterval);
       window.clearInterval(clockInterval);
+      document.removeEventListener("visibilitychange", refreshVisibleForecast);
     };
-  }, [refreshAntistorm, refreshWeather]);
+  }, [needsWeather, refreshAntistorm, refreshWeather]);
 
-  const weatherAssessment = useMemo(() => weather ? assessThreeDayWeather(weather, { now: new Date(weatherClock), carWalkMinutes: 30 }) : null, [weather, weatherClock]);
+  const weatherAssessment = useMemo(
+    () => weather
+      ? assessThreeDayWeather(weather, {
+        now: new Date(weatherClock),
+        carWalkMinutes: 30,
+        parkCalendar,
+      })
+      : null,
+    [weather, weatherClock, parkCalendar],
+  );
+  const effectiveShowSchedule = useMemo(
+    () => showSchedule ? mergeOfficialShowCalendar(showSchedule, parkCalendar) : null,
+    [showSchedule, parkCalendar],
+  );
   const queueMapFor = useCallback((queueData) => Object.fromEntries(Object.values(ALL_ATTRACTIONS_BY_ID).map((attraction) => [attraction.id, queueForAttraction(attraction, queueData)])), []);
-  const buildPlanForProfile = useCallback((profileInput, queueData, scheduleData = showScheduleRef.current) => {
+  const buildPlanForProfile = useCallback((profileInput, queueData, scheduleData = showScheduleRef.current, {
+    currentPosition,
+    excludedIds = [],
+  } = {}) => {
     const normalizedProfile = normalizeDraftProfile(profileInput, DEFAULT_PROFILE);
     const safeProfile = normalizedProfile.members.filter(isGuardian).length < 2 ? { ...normalizedProfile, splitPolicy: "never" } : normalizedProfile;
-    const basePlan = buildUniversalPlan({ ...safeProfile, queueSnapshotAt: queueData?.updatedAt ?? null }, { queueById: queueMapFor(queueData) });
-    return overlayShowsOnPlan(basePlan, scheduleData);
-  }, [queueMapFor]);
+    const excluded = new Set(Array.isArray(excludedIds) ? excludedIds : []);
+    const availableAttractions = excluded.size > 0
+      ? ALL_ATTRACTIONS.filter((attraction) => !excluded.has(attraction.id))
+      : ALL_ATTRACTIONS;
+    const basePlan = buildUniversalPlan(
+      { ...safeProfile, queueSnapshotAt: queueData?.updatedAt ?? null },
+      {
+        attractions: availableAttractions,
+        queueById: queueMapFor(queueData),
+        parkCalendar,
+        ...(currentPosition ? { currentPosition } : {}),
+      },
+    );
+    return overlayShowsOnPlan(basePlan, scheduleData, { parkCalendar });
+  }, [parkCalendar, queueMapFor]);
 
   const generate = useCallback(() => {
     setGenerationError("");
+    const officialVisitWindow = resolveOfficialVisitWindow(profile, parkCalendar);
+    if (officialVisitWindow.state === "closed" || officialVisitWindow.state === "outside-hours") {
+      setGenerationError(officialVisitWindow.issues?.[0] || "Wybrany termin nie mieści się w potwierdzonych godzinach działania parku.");
+      setStep(0);
+      setScreen("onboarding");
+      window.scrollTo({ top: 0, behavior: "auto" });
+      return;
+    }
     const nextPlan = buildPlanForProfile(profile, queues);
     if (countPlanAttractions(nextPlan) === 0) {
-      setGenerationError("Podnieś limit kolejki, poluzuj tryb „spokojnie” lub sprawdź wzrost i wiek uczestników. Nie udostępnimy pustego linku udającego plan.");
+      setGenerationError(nextPlan.safety?.issues?.[0] || "Podnieś limit kolejki, poluzuj tryb „spokojnie” lub sprawdź wzrost i wiek uczestników. Nie udostępnimy pustego linku udającego plan.");
       setStep(STEP_LABELS.length - 1);
       setScreen("onboarding");
       window.scrollTo({ top: 0, behavior: "auto" });
@@ -1353,7 +2007,7 @@ export function App() {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     setScreen("plan");
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, [buildPlanForProfile, profile, queues]);
+  }, [buildPlanForProfile, parkCalendar, profile, queues]);
 
   const prepareFreshPlan = ({ dayCount = 1, startDate = null } = {}, backScreen = "entry") => {
     const freshProfile = normalizeDraftProfile({ ...DEFAULT_PROFILE, dayCount, visitStartDate: startDate || DEFAULT_PROFILE.visitStartDate }, DEFAULT_PROFILE);
@@ -1371,21 +2025,31 @@ export function App() {
     window.scrollTo({ top: 0, behavior: "auto" });
   };
 
-  const reanalyze = async () => {
-    if (!plan) return;
+  const reanalyze = async (currentPosition, excludedIds = []) => {
+    if (!plan) return { status: "missing" };
     const latestQueues = await refreshQueues();
-    const nextPlan = buildPlanForProfile(plan.profile, latestQueues || queues);
-    if (countPlanAttractions(nextPlan) === 0) return;
+    const effectiveQueues = latestQueues || queues;
+    const nextPlan = buildPlanForProfile(plan.profile, effectiveQueues, showScheduleRef.current, {
+      currentPosition,
+      excludedIds,
+    });
+    if (countPlanAttractions(nextPlan) === 0) return { status: "missing" };
     setPlan(nextPlan);
     writeStored(PLAN_KEY, nextPlan);
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
     window.scrollTo({ top: 0, behavior: "auto" });
+    return {
+      status: latestQueues ? "updated" : effectiveQueues ? "retained" : "missing",
+      freshness: latestQueues?.freshness || queueFreshness(effectiveQueues?.updatedAt ?? null).state,
+    };
   };
 
-  const refreshShowsAndReanalyze = useCallback(async () => {
+  const refreshShowsAndReanalyze = useCallback(async (excludedIds = []) => {
     const latestShows = await refreshShows();
     if (!plan) return latestShows;
-    const nextPlan = buildPlanForProfile(plan.profile, queues, latestShows || showScheduleRef.current);
+    const nextPlan = buildPlanForProfile(plan.profile, queues, latestShows || showScheduleRef.current, {
+      excludedIds,
+    });
     if (countPlanAttractions(nextPlan) === 0) return latestShows;
     setPlan(nextPlan);
     writeStored(PLAN_KEY, nextPlan);
@@ -1393,7 +2057,7 @@ export function App() {
     return latestShows;
   }, [buildPlanForProfile, plan, queues, refreshShows]);
 
-  const toggleShowsInPlan = useCallback((includeShows) => {
+  const toggleShowsInPlan = useCallback((includeShows, excludedIds = []) => {
     const sourceProfile = plan?.profile || profile;
     const nextProfile = normalizeDraftProfile({
       ...sourceProfile,
@@ -1401,12 +2065,26 @@ export function App() {
     }, DEFAULT_PROFILE);
     setProfile(nextProfile);
     if (!plan) return;
-    const nextPlan = buildPlanForProfile(nextProfile, queues, showScheduleRef.current);
+    const nextPlan = buildPlanForProfile(nextProfile, queues, showScheduleRef.current, {
+      excludedIds,
+    });
     if (countPlanAttractions(nextPlan) === 0) return;
     setPlan(nextPlan);
     writeStored(PLAN_KEY, nextPlan);
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
   }, [buildPlanForProfile, plan, profile, queues]);
+
+  const replaceAttraction = useCallback((request, replacementId, queueById) => {
+    if (!plan) return null;
+    const nextPlan = replacePlannedAttraction(plan, request, replacementId, {
+      queueById,
+      parkCalendar,
+    });
+    setPlan(nextPlan);
+    writeStored(PLAN_KEY, nextPlan);
+    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    return nextPlan;
+  }, [parkCalendar, plan]);
 
   const leaveSharedShortLink = () => {
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
@@ -1433,12 +2111,12 @@ export function App() {
   }
 
   if (screen === "weather") {
-    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} damagedLink={sharedHashPresent && !plan} onBack={() => setScreen("entry")} onContinue={(selection) => prepareFreshPlan(selection, "weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
+    return <WeatherStart weather={weather} assessment={weatherAssessment} status={weatherStatus} onRefresh={refreshWeather} parkCalendar={parkCalendar} parkCalendarStatus={parkCalendarStatus} damagedLink={sharedHashPresent && !plan} onBack={() => setScreen("entry")} onContinue={(selection) => prepareFreshPlan(selection, "weather")} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
   }
 
   if (screen === "welcome") return <Welcome onStart={beginOnboarding} onBack={() => setScreen(welcomeBackScreen)} backLabel={welcomeBackScreen === "weather" ? "Wróć do pogody" : "Wróć do początku"} onResume={storedPlan ? () => { setPlan(storedPlan); setScreen("plan"); } : null} />;
 
-  if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} onRefreshQueues={() => refreshQueues()} generationError={generationError} weatherAssessment={weatherAssessment} />;
+  if (screen === "onboarding") return <Onboarding profile={profile} setProfile={setProfile} step={step} setStep={setStep} onGenerate={generate} queueStatus={queueStatus} queueUpdatedAt={queues?.updatedAt ?? null} queueFreshnessState={queues?.freshness ?? "unknown"} onRefreshQueues={() => refreshQueues()} generationError={generationError} weatherAssessment={weatherAssessment} parkCalendar={parkCalendar} parkCalendarStatus={parkCalendarStatus} />;
   if (!plan) return null;
-  return <PlanView plan={plan} initialShortPlanUrl={shortHashPresent && !shortLinkDismissed ? createShortPlanUrl(shortPlanToken) : ""} onReanalyze={reanalyze} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} showSchedule={showSchedule} showStatus={showStatus} onRefreshShows={refreshShowsAndReanalyze} onToggleShows={toggleShowsInPlan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
+  return <PlanView plan={plan} initialShortPlanUrl={shortHashPresent && !shortLinkDismissed ? createShortPlanUrl(shortPlanToken) : ""} onReanalyze={reanalyze} onReplaceAttraction={replaceAttraction} weatherAssessment={weatherAssessment} weatherStatus={weatherStatus} onRefreshWeather={refreshWeather} parkCalendar={parkCalendar} parkCalendarStatus={parkCalendarStatus} queues={queues} queueStatus={queueStatus} showSchedule={effectiveShowSchedule} showStatus={showStatus} onRefreshShows={refreshShowsAndReanalyze} onToggleShows={toggleShowsInPlan} onEdit={() => { setGenerationError(""); setProfile(normalizeDraftProfile(plan.profile, DEFAULT_PROFILE)); setStep(0); setScreen("onboarding"); }} />;
 }

@@ -18,7 +18,14 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { RAIN_ALERT_STATE } from "./rainAlert.js";
-import { formatFreshness, formatPolishDay } from "./weather.js";
+import {
+  formatFreshness,
+  formatPolishDay,
+  OFFICIAL_PARK_CALENDAR_URL,
+  PARK_HOURS,
+  summarizeWeatherSources,
+} from "./weather.js";
+import { parkCalendarFreshness, parkDayForDate } from "./parkCalendar.js";
 
 const DIAL_ANGLES = Object.freeze({ sun: -48, cloud: 50, rain: 180 });
 const DIAL_LABELS = Object.freeze({ sun: "słońce", cloud: "chmury", rain: "deszcz" });
@@ -41,6 +48,7 @@ function formatVisitStart(dateKey) {
 }
 
 function visitHeadline(visit) {
+  if (visit?.status === "park-closed") return "Park jest zamknięty w tych dniach.";
   if (!visit || visit.dayCount == null) return "Najpierw sprawdźmy pogodę.";
   if (visit.status === "avoid") return "Jeszcze nie kupuj dłuższego pobytu.";
   if (visit.dayCount === 3) return "3 dni mają sens.";
@@ -160,12 +168,19 @@ function SourceSheet({ weather, onClose }) {
   );
 }
 
-function HourSheet({ recommendation, onClose }) {
+function HourSheet({ recommendation, onClose, parkDay }) {
   const hours = recommendation?.hours || [];
   const start = recommendation?.bestWindow?.start;
   const end = recommendation?.bestWindow?.end;
+  const confirmedHours = parkDay?.confirmed
+    && parkDay.state === "open"
+    && parkDay.opensAt
+    && parkDay.closesAt;
+  const hoursLabel = confirmedHours
+    ? `${parkDay.opensAt}–${parkDay.closesAt}`
+    : "10:00–20:00";
   return (
-    <SheetFrame eyebrow="PARK 10:00–20:00" title="Plan godzinowy" closeLabel="Zamknij plan godzinowy" onClose={onClose}>
+    <SheetFrame eyebrow={`${confirmedHours ? "PARK" : "ANALIZA"} ${hoursLabel}`} title="Plan godzinowy" closeLabel="Zamknij plan godzinowy" onClose={onClose}>
       <div className="weather-hour-list">
         {hours.map((hour) => {
           const selected = start != null && hour.hour >= start && hour.hour < end;
@@ -187,7 +202,7 @@ function HourSheet({ recommendation, onClose }) {
           );
         })}
       </div>
-      <p className="weather-sheet-note">Fioletowe wiersze tworzą najlepsze ciągłe okno wizyty. To plan dnia, nie alert na najbliższe pół godziny.</p>
+      <p className="weather-sheet-note">Fioletowe wiersze tworzą najlepsze ciągłe okno wizyty. {confirmedHours ? `Oficjalny kalendarz potwierdza godziny ${hoursLabel} dla tego dnia.` : `Przedział ${hoursLabel} jest założeniem analizy, nie potwierdzonymi godzinami otwarcia.`} <a href={parkDay?.sourceUrl || OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Sprawdź oficjalny kalendarz parku.</a></p>
     </SheetFrame>
   );
 }
@@ -259,7 +274,18 @@ export function RainSafetyCard({ assessment, status = "ready", onRefresh, compac
   );
 }
 
-export function WeatherStart({ weather, assessment, status, onRefresh, onContinue, onResume, onBack, damagedLink = false }) {
+export function WeatherStart({
+  weather,
+  assessment,
+  status,
+  onRefresh,
+  onContinue,
+  onResume,
+  onBack,
+  parkCalendar,
+  parkCalendarStatus,
+  damagedLink = false,
+}) {
   const [sheet, setSheet] = useState(null);
   const preferredDayIndex = assessment?.visit?.selectedIndices?.[0]
     ?? assessment?.days?.find((day) => Number.isFinite(day.recommendation?.score))?.index
@@ -286,6 +312,38 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
   const recommendedStart = visit?.selectedDateKeys?.[0] ?? selectedDay?.dateKey ?? null;
   const recommendedCount = visit?.dayCount ?? 1;
   const rainTone = alertPresentation(assessment?.rainAlert).tone;
+  const sourceSummary = summarizeWeatherSources(weather);
+  const analysisHours = `${String(PARK_HOURS.open).padStart(2, "0")}:00–${String(PARK_HOURS.close).padStart(2, "0")}:00`;
+  const selectedParkDay = selectedDay?.park || parkDayForDate(parkCalendar, selectedDay?.dateKey);
+  const calendarFreshness = parkCalendarFreshness(parkCalendar);
+  const hasOfficialHours = selectedParkDay.confirmed
+    && selectedParkDay.state === "open"
+    && selectedParkDay.opensAt
+    && selectedParkDay.closesAt;
+  const operatingHours = hasOfficialHours
+    ? `${selectedParkDay.opensAt}–${selectedParkDay.closesAt}`
+    : analysisHours;
+  const recommendedParkDay = parkDayForDate(parkCalendar, recommendedStart);
+  const planningBlocked = selectedParkDay.state === "closed"
+    || recommendedParkDay.state === "closed"
+    || visit?.status === "park-closed";
+  const scoredDayValues = (assessment?.days || [])
+    .filter((day) => Number.isFinite(day.recommendation?.score))
+    .map((day) => day.recommendation.score);
+  const visitSummary = visit?.status === "park-closed"
+    ? "Oficjalny kalendarz potwierdza zamknięcie"
+    : scoredDayValues.length
+      ? `${scoredDayValues.join(" + ")} pkt • start ${formatVisitStart(recommendedStart)}`
+      : "Brak potwierdzonej rekomendacji terminu";
+  const weatherStatusLabel = refreshing
+    ? "ODŚWIEŻAM"
+    : status === "loading"
+      ? "ŁĄCZĘ"
+      : status === "stale"
+        ? "NIEAKTUALNE"
+        : status === "error" || !sourceSummary.hasForecast
+          ? "BRAK DANYCH"
+          : "SPRAWDZONE";
   const dayTabs = useMemo(() => [
     { label: "Dzisiaj", day: assessment?.days?.[0] },
     { label: "Jutro", day: assessment?.days?.[1] },
@@ -295,6 +353,7 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
   const continueWith = (selection = visit) => {
     const dayCount = selection?.dayCount ?? recommendedCount;
     const startDate = selection?.selectedDateKeys?.[0] ?? recommendedStart;
+    if (parkDayForDate(parkCalendar, startDate).state === "closed") return;
     setSheet(null);
     onContinue({ dayCount, startDate });
   };
@@ -308,7 +367,7 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
             <div><p>PogodaPark</p><span>ENERGYLANDIA • ZATOR</span></div>
           </div>
           <button className={`weather-live-pill ${refreshing ? "busy" : ""}`} type="button" onClick={onRefresh} disabled={refreshing}>
-            <span />{refreshing ? "ODŚWIEŻAM" : "NA ŻYWO"}
+            <span />{weatherStatusLabel}
           </button>
         </header>
 
@@ -323,7 +382,7 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
         <section className="weather-decision" aria-live="polite">
           <div className="weather-decision-heading">
             <div>
-              <p className="eyebrow">{selectedDay?.dateKey ? `${formatPolishDay(selectedDay.dateKey).toUpperCase()} • 10:00–20:00` : "ZATOR • POGODA NA ŻYWO"}</p>
+              <p className="eyebrow">{selectedDay?.dateKey ? `${formatPolishDay(selectedDay.dateKey).toUpperCase()} • ${selectedParkDay.state === "closed" ? "PARK ZAMKNIĘTY" : hasOfficialHours ? `PARK ${operatingHours}` : `ANALIZA ${analysisHours}`}` : "ZATOR • OCENA POGODY"}</p>
               <h1>{loading ? "Czytam prognozy…" : recommendation?.headline || "Brak uczciwego werdyktu."}</h1>
             </div>
             <div className="weather-score" aria-label={`Ocena ${scoreText} na 100`}><strong>{scoreText}</strong><span>/100</span></div>
@@ -341,10 +400,14 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
           )}
         </section>
 
+        {selectedParkDay.state === "closed" && <div className="weather-inline-warning" role="alert"><WarningCircle size={21} weight="fill" /><span>Oficjalny kalendarz potwierdza, że tego dnia Energylandia jest zamknięta. Wybierz inny termin.</span></div>}
+        {hasOfficialHours && <p className="weather-sheet-note">Oficjalne godziny tego dnia: {operatingHours} · {calendarFreshness.label}. <a href={selectedParkDay.sourceUrl || OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Kalendarz Energylandii</a>.</p>}
+        {selectedParkDay.state === "unknown" && parkCalendarStatus !== "loading" && <p className="weather-sheet-note">Godziny otwarcia nie są potwierdzone; {analysisHours} to tylko założenie analizy. <a href={OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Sprawdź oficjalny kalendarz</a>.</p>}
+
         {visit && (
           <button className={`weather-trip-summary trip-${visit.status}`} type="button" onClick={() => setSheet("visit")}>
             <Ticket size={22} weight="duotone" aria-hidden="true" />
-            <span><small>1, 2 CZY 3 DNI?</small><strong>{visitHeadline(visit)}</strong><em>{assessment.days.filter((day) => Number.isFinite(day.recommendation?.score)).map((day) => day.recommendation.score).join(" + ")} pkt • start {formatVisitStart(recommendedStart)}</em></span>
+            <span><small>1, 2 CZY 3 DNI?</small><strong>{visitHeadline(visit)}</strong><em>{visitSummary}</em></span>
             <CaretRight size={18} aria-hidden="true" />
           </button>
         )}
@@ -353,8 +416,8 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
 
         {(status === "error" || status === "stale") && <div className="weather-inline-warning" role="status"><WarningCircle size={21} weight="fill" /><span>{status === "stale" ? "Pokazujemy ostatnią udaną prognozę. Odśwież przed decyzją o zakupie." : "Nie udało się pobrać prognozy. Trasę nadal możesz ułożyć, ale liczby dni nie wybieraj na ślepo."}</span></div>}
 
-        <button className="weather-continue" type="button" onClick={() => continueWith()}>
-          <span><strong>Ułóż trasę</strong><small>{recommendedCount} {recommendedCount === 1 ? "dzień" : "dni"} od {formatVisitStart(recommendedStart)} — zmienisz to w ankiecie</small></span>
+        <button className="weather-continue" type="button" disabled={planningBlocked} onClick={() => continueWith()}>
+          <span><strong>{planningBlocked ? "Wybierz otwarty dzień" : "Ułóż trasę"}</strong><small>{planningBlocked ? "W oficjalnie zamkniętym parku nie układamy trasy." : `${recommendedCount} ${recommendedCount === 1 ? "dzień" : "dni"} od ${formatVisitStart(recommendedStart)} — zmienisz to w ankiecie`}</small></span>
           <ArrowRight size={22} weight="bold" />
         </button>
         {rainTone !== "danger" && <RainSafetyCard assessment={assessment} status={status} onRefresh={onRefresh} compact />}
@@ -367,17 +430,17 @@ export function WeatherStart({ weather, assessment, status, onRefresh, onContinu
 
         <button className="weather-source-summary" type="button" onClick={() => setSheet("sources")} disabled={!weather?.sources?.length}>
           <Database size={19} weight="duotone" aria-hidden="true" />
-          <span><strong>5 źródeł pogody</strong><small>ICM • Antistorm • DWD + 2 modele</small></span>
-          <span>{formatFreshness(weather?.updatedAt)}</span>
+          <span><strong>{sourceSummary.totalCount ? `${sourceSummary.availableCount}/${sourceSummary.totalCount} źródeł dostępnych` : "Łączę źródła pogody"}</strong><small>{sourceSummary.totalCount ? `Modele godzinowe: ${sourceSummary.numericSourceCount}/3 • Antistorm: ${sourceSummary.hasNowcast ? "dostępny" : "brak danych"}` : "ICM • Antistorm • DWD + 2 modele"}</small></span>
+          <span>{formatFreshness(sourceSummary.checkedAt)}</span>
           <CaretRight size={18} aria-hidden="true" />
         </button>
 
-        <footer className="weather-start-footer"><Info size={15} aria-hidden="true" /><p>Nieoficjalna rekomendacja pogodowa. Zwykły deszcz nie zamyka parku; burze i silny wiatr mogą czasowo wyłączyć atrakcje.</p></footer>
+        <footer className="weather-start-footer"><Info size={15} aria-hidden="true" /><p>Nieoficjalna rekomendacja pogodowa. {hasOfficialHours ? `Godziny ${operatingHours} potwierdza oficjalny kalendarz.` : `Godziny ${analysisHours} są wyłącznie założeniem analizy.`} <a href={selectedParkDay.sourceUrl || OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Sprawdź kalendarz</a>. Burze i silny wiatr mogą czasowo wyłączyć atrakcje.</p></footer>
         {onBack && <button className="weather-change-path" type="button" onClick={onBack}><ArrowLeft size={16} weight="bold" /> Wróć do wyboru startu</button>}
       </div>
 
       {sheet === "sources" && <SourceSheet weather={weather} onClose={() => setSheet(null)} />}
-      {sheet === "hours" && <HourSheet recommendation={recommendation} onClose={() => setSheet(null)} />}
+      {sheet === "hours" && <HourSheet recommendation={recommendation} parkDay={selectedParkDay} onClose={() => setSheet(null)} />}
       {sheet === "visit" && <VisitSheet assessment={assessment} onUseRecommendation={continueWith} onClose={() => setSheet(null)} />}
     </main>
   );

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { buildUniversalPlan } from "../src/planner.js";
 import {
   createEmailDraftUrl,
+  createPlanUrl,
   createShortPlanLink,
+  createShortPlanUrl,
   decodePlan,
   encodeCompactPlan,
   encodePlan,
@@ -368,6 +370,21 @@ test("krótki link zapisuje wyłącznie compact v2 i ma klikalny hash bez znaku 
   assert.equal(JSON.parse(Buffer.from(body.payload, "base64url").toString("utf8")).v, 2);
   assert.equal(shortPlanTokenFromHash(new URL(url).hash), token);
   assert.equal(hasShortPlanHash(new URL(url).hash), true);
+});
+
+test("linki udostępnienia zachowują plan oraz omijają starą powłokę GitHub Pages", () => {
+  const plan = buildUniversalPlan(profile);
+  const token = "AbCdEfGhIjKlMn_o";
+  const href = "https://example.com/zabhop/planer-energylandia/#plan=legacy";
+  const release = "ABCDEF1234567890";
+
+  const shortUrl = createShortPlanUrl(token, href, release);
+  assert.equal(shortUrl, `https://example.com/zabhop/planer-energylandia/?rabcdef123456#p/${token}`);
+  assert.equal(shortUrl.includes("="), false);
+
+  const localUrl = createPlanUrl(plan, href, release);
+  assert.match(localUrl, /^https:\/\/example\.com\/zabhop\/planer-energylandia\/\?rabcdef123456#plan=/);
+  assert.ok(decodePlan(new URL(localUrl).hash.slice("#plan=".length)));
 });
 
 test("krótki link pobiera plan z API i nadal przechodzi pełną walidację bezpieczeństwa", async () => {

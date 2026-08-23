@@ -1,7 +1,13 @@
 import { classifyProviderForecast } from "./decision.js";
 
 export const ZATOR = { latitude: 49.998, longitude: 19.437 };
-export const PARK_HOURS = { open: 10, close: 20 };
+export const OFFICIAL_PARK_CALENDAR_URL = "https://energylandia.pl/kalendarz/";
+export const PARK_HOURS = Object.freeze({
+  open: 10,
+  close: 20,
+  confirmed: false,
+  sourceUrl: OFFICIAL_PARK_CALENDAR_URL,
+});
 
 function localParts(date) {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -177,7 +183,10 @@ function mergeDay(day, openMeteo, metNorway, brightSky) {
   const dwdMap = new Map((brightSky?.hours || []).filter((hour) => hour.day === day).map((hour) => [hour.hour, hour]));
   const hours = [];
 
-  for (let hour = PARK_HOURS.open; hour < PARK_HOURS.close; hour += 1) {
+  // Keep the full day in the compact in-memory forecast. Official park hours
+  // vary (including 11:30 openings and special 23:00 closings), and the
+  // decision layer narrows these entries to each confirmed calendar day.
+  for (let hour = 0; hour < 24; hour += 1) {
     const om = omMap.get(hour);
     const met = metMap.get(hour);
     const dwd = dwdMap.get(hour);
@@ -222,6 +231,28 @@ function sourceRecord(name, result, okDetail, errorDetail, href) {
   return { name, status: "error", detail: errorDetail, updatedAt: null, href };
 }
 
+export function summarizeWeatherSources(weather) {
+  const sources = Array.isArray(weather?.sources) ? weather.sources : [];
+  const availableSources = sources.filter((source) => source?.status === "ok");
+  const numericSourceCount = Number.isFinite(weather?.numericSourceCount)
+    ? Math.max(0, weather.numericSourceCount)
+    : 0;
+  const nowcastSource = sources.find((source) => source?.name === "Antistorm");
+
+  return {
+    availableCount: availableSources.length,
+    totalCount: sources.length,
+    numericSourceCount,
+    hasForecast: numericSourceCount > 0 && weather?.forecastStatus !== "unavailable",
+    hasNowcast: nowcastSource?.status === "ok",
+    checkedAt: weather?.checkedAt || weather?.updatedAt || null,
+    unavailableNames: sources
+      .filter((source) => source?.status !== "ok")
+      .map((source) => source.name)
+      .filter(Boolean),
+  };
+}
+
 export async function loadWeather() {
   const { today, tomorrow, dayAfterTomorrow } = todayAndTomorrow();
   const [openMeteoResult, metResult, brightSkyResult, icmResult, antistormResult] = await Promise.allSettled([
@@ -246,30 +277,44 @@ export async function loadWeather() {
     sourceRecord("Antistorm", antistormResult, (value) => `Nowcast co 15 min • ${value.m} (najbliższy punkt)`, "Nowcast chwilowo niedostępny", "https://antistorm.eu/"),
   ];
 
+  const days = {
+    [today]: mergeDay(today, openMeteo, metNorway, brightSky),
+    [tomorrow]: mergeDay(tomorrow, openMeteo, metNorway, brightSky),
+    [dayAfterTomorrow]: mergeDay(dayAfterTomorrow, openMeteo, metNorway, brightSky),
+  };
+  const numericSourceCount = [openMeteo, metNorway, brightSky]
+    .filter((source) => Array.isArray(source?.hours) && source.hours.length > 0)
+    .length;
+  const hasForecast = numericSourceCount > 0
+    && Object.values(days).some((hours) => hours.length > 0);
+  const checkedAt = new Date().toISOString();
+
   return {
-    days: {
-      [today]: mergeDay(today, openMeteo, metNorway, brightSky),
-      [tomorrow]: mergeDay(tomorrow, openMeteo, metNorway, brightSky),
-      [dayAfterTomorrow]: mergeDay(dayAfterTomorrow, openMeteo, metNorway, brightSky),
-    },
+    days,
     today,
     tomorrow,
     dayAfterTomorrow,
     sources,
     icm,
     antistorm,
-    numericSourceCount: [openMeteo, metNorway, brightSky].filter(Boolean).length,
-    updatedAt: new Date().toISOString(),
+    numericSourceCount,
+    availableSourceCount: sources.filter((source) => source.status === "ok").length,
+    forecastStatus: hasForecast ? "ready" : "unavailable",
+    checkedAt,
+    updatedAt: hasForecast ? checkedAt : null,
+    parkHours: PARK_HOURS,
   };
 }
 
 export function formatFreshness(iso) {
   if (!iso) return "brak czasu";
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "brak czasu";
   return new Intl.DateTimeFormat("pl-PL", {
     timeZone: "Europe/Warsaw",
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(iso));
+  }).format(date);
 }
 
 export function formatPolishDay(dateKey, short = false) {

@@ -1,3 +1,5 @@
+import { parkCalendarFreshness, parkDayForDate } from "./parkCalendar.js";
+
 const OFFICIAL_SHOW_INDEX = "https://energylandia.pl/show/";
 // GitHub Pages republishes the official snapshot on a best-effort schedule. In
 // practice GitHub may coalesce cron runs, so a 90-minute window made a healthy
@@ -37,6 +39,121 @@ function officialUrl(value, path = "/") {
   } catch {
     return null;
   }
+}
+
+function officialShowSlug(value) {
+  const url = officialUrl(value, "/show/");
+  if (!url) return null;
+  const match = new URL(url).pathname.match(/^\/show\/([^/]+)\/?$/u);
+  return match ? match[1].toLowerCase() : null;
+}
+
+function completeShowDetails(show, fallbackCheckedAt) {
+  if (!show || typeof show !== "object") return null;
+  const slug = officialShowSlug(show.url);
+  const description = String(show.description || "").trim();
+  const venue = String(show.venue || "").trim();
+  const durationMinutes = Number(show.durationMinutes);
+  const checkedAt = Date.parse(show.checkedAt || fallbackCheckedAt || "");
+  if (
+    !slug
+    || !description
+    || !venue
+    || venue === "Miejsce na terenie parku"
+    || !Number.isInteger(durationMinutes)
+    || durationMinutes < 5
+    || durationMinutes > 120
+    || !Number.isFinite(checkedAt)
+  ) return null;
+
+  return { slug, checkedAt: new Date(checkedAt).toISOString() };
+}
+
+export function mergeOfficialShowCalendar(showData, parkCalendar, { now = Date.now() } = {}) {
+  if (!showData || !Array.isArray(showData.shows) || !parkCalendar) return showData;
+  const freshness = parkCalendarFreshness(parkCalendar, now);
+  if (freshness.state !== "fresh" || !freshness.checkedAt) return showData;
+  const detailsSourceFreshness = showScheduleFreshness(showData, now);
+  const detailsSourceIsFresh = detailsSourceFreshness.state === "fresh";
+
+  const detailsBySlug = new Map();
+  for (const show of showData.shows) {
+    const details = completeShowDetails(show, showData.source?.checkedAt);
+    if (!details) continue;
+    if (detailsBySlug.has(details.slug)) detailsBySlug.set(details.slug, null);
+    else detailsBySlug.set(details.slug, { show, details });
+  }
+
+  const slotsBySlug = new Map();
+  let matchedCount = 0;
+  let unmatchedCount = 0;
+  const dates = Object.keys(parkCalendar.days || {}).filter(validDateKey).sort();
+
+  for (const date of dates) {
+    const day = parkDayForDate(parkCalendar, date, { now });
+    if (!day.confirmed || day.state !== "open") continue;
+
+    for (const calendarShow of day.shows || []) {
+      const slug = officialShowSlug(calendarShow?.url);
+      const match = slug ? detailsBySlug.get(slug) : null;
+      if (!match) {
+        unmatchedCount += 1;
+        continue;
+      }
+
+      const duration = match.show.durationMinutes;
+      const openingMinutes = Number(day.opensAt.slice(0, 2)) * 60 + Number(day.opensAt.slice(3));
+      const closingMinutes = Number(day.closesAt.slice(0, 2)) * 60 + Number(day.closesAt.slice(3));
+      const times = [...new Set((Array.isArray(calendarShow.times) ? calendarShow.times : [])
+        .filter(validTime)
+        .filter((time) => {
+          const start = Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+          return start >= openingMinutes && start + duration <= closingMinutes;
+        }))].sort();
+      if (!times.length) continue;
+
+      const slots = slotsBySlug.get(slug) || [];
+      slots.push({ date, label: day.title || "Oficjalny kalendarz Energylandii", times });
+      slotsBySlug.set(slug, slots);
+      matchedCount += 1;
+    }
+  }
+
+  if (!matchedCount) return showData;
+
+  const shows = showData.shows.map((show) => {
+    const slug = officialShowSlug(show.url);
+    const match = slug ? detailsBySlug.get(slug) : null;
+    const schedule = slug ? slotsBySlug.get(slug) || [] : [];
+    const detailsAreFresh = detailsSourceIsFresh && Boolean(match) && show.stale !== true
+      && showScheduleFreshness({ source: { checkedAt: match?.details.checkedAt, status: "fresh" } }, now).state === "fresh";
+    return {
+      ...show,
+      schedule,
+      stale: schedule.length ? !detailsAreFresh : show.stale === true,
+      completeForScheduling: Boolean(schedule.length && detailsAreFresh && show.completeForScheduling === true),
+      checkedAt: schedule.length ? freshness.checkedAt : show.checkedAt,
+      detailsCheckedAt: match?.details.checkedAt || null,
+      calendarCheckedAt: schedule.length ? freshness.checkedAt : null,
+      calendarConfirmed: schedule.length > 0,
+    };
+  });
+
+  return {
+    ...showData,
+    source: {
+      ...showData.source,
+      label: "Oficjalny kalendarz i zweryfikowane opisy pokazów Energylandii",
+      url: parkCalendar.source?.url || OFFICIAL_SHOW_INDEX,
+      checkedAt: freshness.checkedAt,
+      detailsCheckedAt: showData.source?.checkedAt || null,
+      calendarCheckedAt: freshness.checkedAt,
+      status: detailsSourceIsFresh ? "fresh" : "partial",
+      scheduleRange: dates.length ? { from: dates[0], to: dates.at(-1) } : null,
+      note: `Godziny pochodzą z oficjalnego kalendarza; opisy, czas trwania i miejsca z osobno zweryfikowanych stron pokazów.${unmatchedCount ? ` Pominięto ${unmatchedCount} pozycji bez kompletnych, dopasowanych opisów.` : ""}`,
+    },
+    shows,
+  };
 }
 
 function normaliseShow(raw) {
@@ -105,7 +222,11 @@ export function showScheduleFreshness(data, now = Date.now()) {
 export function showsOnDate(data, dateKey, { schedulableOnly = false, includeRetainedStale = false } = {}) {
   if (!validDateKey(dateKey)) return [];
   return (Array.isArray(data?.shows) ? data.shows : [])
-    .filter((show) => (includeRetainedStale || !show.stale) && (!schedulableOnly || show.completeForScheduling))
+    .filter((show) => (
+      includeRetainedStale
+      || !show.stale
+      || (!schedulableOnly && show.calendarConfirmed === true)
+    ) && (!schedulableOnly || show.completeForScheduling))
     .flatMap((show) => (show.schedule || [])
       .filter((slot) => slot.date === dateKey)
       .map((slot) => ({ ...show, times: slot.times, date: slot.date, scheduleLabel: slot.label })))

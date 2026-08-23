@@ -1,4 +1,5 @@
 import { chooseRecommendation } from "./decision.js";
+import { parkDayForDate } from "./parkCalendar.js";
 import { evaluateRainAlert } from "./rainAlert.js";
 import { nextLocalHour } from "./weather.js";
 
@@ -85,25 +86,37 @@ function selectedPayload(candidateValue) {
 export function recommendVisitLength(daysInput, options = {}) {
   const days = Array.isArray(daysInput) ? daysInput.slice(0, 3) : [];
   const thresholds = { ...DEFAULT_THRESHOLDS, ...options.thresholds };
-  const knownDays = days.filter((day) => finiteScore(day) != null);
-  const missingCount = Math.max(0, 3 - knownDays.length);
+  const closedDays = days.filter((day) => day?.park?.confirmed && day.park.state === "closed");
+  const knownDays = days.filter((day) => finiteScore(day) != null && day?.park?.state !== "closed");
+  const missingCount = Math.max(0, 3 - knownDays.length - closedDays.length);
   const warnings = [];
+
+  if (closedDays.length > 0) {
+    warnings.push(`Oficjalny kalendarz potwierdza zamknięcie parku: ${closedDays.map(dateKeyOf).filter(Boolean).join(", ")}.`);
+  }
 
   if (missingCount > 0) {
     warnings.push(`Brakuje uczciwej oceny dla ${missingCount} z 3 dni — brak danych nie jest traktowany jak dobra pogoda.`);
   }
 
   if (!knownDays.length) {
+    const allKnownDaysClosed = closedDays.length > 0 && missingCount === 0;
     return {
       dayCount: null,
-      status: "insufficient-data",
-      confidence: "niska",
+      status: allKnownDaysClosed ? "park-closed" : "insufficient-data",
+      confidence: allKnownDaysClosed ? "wysoka" : "niska",
       selectedIndices: [],
       selectedDateKeys: [],
       score: null,
-      headline: "Za mało danych, żeby wybrać liczbę dni.",
-      summary: "Nie kupuj dłuższego pobytu wyłącznie na podstawie niepełnej prognozy.",
-      reasons: ["Żaden z trzech dni nie ma wiarygodnej oceny godzinowej."],
+      headline: allKnownDaysClosed
+        ? "Park jest zamknięty we wszystkich sprawdzanych dniach."
+        : "Za mało danych, żeby wybrać liczbę dni.",
+      summary: allKnownDaysClosed
+        ? "Oficjalny kalendarz Energylandii nie potwierdza otwarcia parku w żadnym z tych terminów."
+        : "Nie kupuj dłuższego pobytu wyłącznie na podstawie niepełnej prognozy.",
+      reasons: [allKnownDaysClosed
+        ? "Każdy sprawdzany dzień został oznaczony jako zamknięty w oficjalnym kalendarzu."
+        : "Żaden z trzech dni nie ma wiarygodnej oceny godzinowej."],
       warnings,
     };
   }
@@ -199,8 +212,8 @@ export function recommendVisitLength(daysInput, options = {}) {
 export function assessThreeDayWeather(weather, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const safeNow = Number.isFinite(now.getTime()) ? now : new Date();
-  const parkOpen = options.parkOpen ?? 10;
-  const parkClose = options.parkClose ?? 20;
+  const fallbackParkOpen = options.parkOpen ?? 10;
+  const fallbackParkClose = options.parkClose ?? 20;
   const visitHours = options.visitHours ?? 5;
   // Keep all three calendar slots. Collapsing a missing `today` key would make
   // tomorrow look like today and could incorrectly apply the live nowcast to it.
@@ -209,6 +222,40 @@ export function assessThreeDayWeather(weather, options = {}) {
   const numericSourceCount = Number.isFinite(weather?.numericSourceCount) ? weather.numericSourceCount : 0;
 
   const days = keys.map((dateKey, index) => {
+    const park = options.parkCalendar && dateKey
+      ? parkDayForDate(options.parkCalendar, dateKey, { now: safeNow.getTime() })
+      : null;
+    if (park?.state === "closed" && park.confirmed) {
+      return {
+        index,
+        dateKey,
+        isToday: index === 0,
+        park,
+        recommendation: {
+          score: null,
+          label: "PARK ZAMKNIĘTY",
+          headline: "Park tego dnia jest zamknięty.",
+          confidence: "wysoka",
+          bestWindow: null,
+          reasons: ["Oficjalny kalendarz Energylandii potwierdza zamknięcie parku"],
+          antistormStatus: "brak",
+          metrics: null,
+          hours: [],
+        },
+      };
+    }
+
+    const openingMinutes = park?.state === "open"
+      ? park.opensAt.split(":").reduce((minutes, part) => minutes * 60 + Number(part), 0)
+      : null;
+    const closingMinutes = park?.state === "open"
+      ? park.closesAt.split(":").reduce((minutes, part) => minutes * 60 + Number(part), 0)
+      : null;
+    // Forecast entries describe complete hourly windows. A park opening at
+    // 11:30 cannot make 11:00–12:00, or a closing at 18:30 make 18:00–19:00,
+    // an entirely available hour for a safe visit recommendation.
+    const parkOpen = Number.isFinite(openingMinutes) ? Math.ceil(openingMinutes / 60) : fallbackParkOpen;
+    const parkClose = Number.isFinite(closingMinutes) ? Math.floor(closingMinutes / 60) : fallbackParkClose;
     const hours = dateKey ? weather?.days?.[dateKey] || [] : [];
     const recommendation = chooseRecommendation(hours, {
       parkOpen,
@@ -221,7 +268,7 @@ export function assessThreeDayWeather(weather, options = {}) {
       antistorm: index === 0 ? weather?.antistorm : null,
       now: safeNow,
     });
-    return { index, dateKey, isToday: index === 0, recommendation };
+    return { index, dateKey, isToday: index === 0, recommendation, ...(park ? { park } : {}) };
   });
 
   const todayHours = weather?.today ? weather?.days?.[weather.today] || [] : [];

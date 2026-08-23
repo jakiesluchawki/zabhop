@@ -11,7 +11,7 @@ on:
       - ".github/workflows/update-energylandia.yml"
   workflow_dispatch:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "17 7-19 * * *"
 
 permissions:
   contents: read
@@ -23,8 +23,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  publish:
+    if: github.event_name != 'schedule' || github.event.schedule == '17 7-19 * * *'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment-first.outputs.page_url || steps.deployment-second.outputs.page_url || steps.deployment-third.outputs.page_url }}
     defaults:
       run:
         working-directory: apps/pogoda-energylandia
@@ -61,6 +66,10 @@ jobs:
         working-directory: apps/planer-energylandia
         run: npm test
 
+      - name: Odśwież oficjalne godziny otwarcia Energylandii
+        working-directory: apps/planer-energylandia
+        run: npm run refresh:calendar
+
       - name: Odśwież oficjalny terminarz pokazów
         working-directory: apps/planer-energylandia
         run: npm run refresh:shows
@@ -96,6 +105,10 @@ jobs:
             ./ _site/
           rsync -a --delete apps/pogoda-energylandia/dist/ _site/pogoda-energylandia/
           rsync -a --delete apps/planer-energylandia/dist/ _site/planer-energylandia/
+          test -f _site/index.html
+          test -f _site/app.js
+          test -f _site/pogoda-energylandia/index.html
+          test -f _site/planer-energylandia/index.html
           for private_directory in .git .github .local apps services ZabHop ZabHopTests ZabHop.xcodeproj Tools tests qa; do
             test ! -e "_site/$private_directory" \
               || { echo "Unexpected private project content: $private_directory" >&2; exit 1; }
@@ -105,18 +118,62 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Przygotuj artefakt Pages
+        id: pages-artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
           retention-days: 30
 
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Opublikuj GitHub Pages
-        id: deployment
+      - name: Opublikuj GitHub Pages — pierwsza próba
+        id: deployment-first
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Zaczekaj przed drugą próbą publikacji
+        if: steps.deployment-first.outcome == 'failure'
+        run: sleep 8
+
+      - name: Opublikuj GitHub Pages — druga próba
+        if: steps.deployment-first.outcome == 'failure'
+        id: deployment-second
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Zaczekaj przed trzecią próbą publikacji
+        if: steps.deployment-second.outcome == 'failure'
+        run: sleep 25
+
+      - name: Opublikuj GitHub Pages — trzecia próba
+        if: steps.deployment-second.outcome == 'failure'
+        id: deployment-third
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Potwierdź wynik publikacji
+        if: always()
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          ARTIFACT_OUTCOME: ${{ steps.pages-artifact.outcome }}
+          FIRST_OUTCOME: ${{ steps.deployment-first.outcome }}
+          SECOND_OUTCOME: ${{ steps.deployment-second.outcome }}
+          THIRD_OUTCOME: ${{ steps.deployment-third.outcome }}
+        run: |
+          if [ "$ARTIFACT_OUTCOME" != "success" ]; then
+            echo "::error::Nie udało się przygotować bezpiecznego artefaktu Pages."
+            exit 1
+          fi
+
+          if [ "$FIRST_OUTCOME" = "success" ] \
+            || [ "$SECOND_OUTCOME" = "success" ] \
+            || [ "$THIRD_OUTCOME" = "success" ]; then
+            echo "Opublikowano Energylandię, zachowując niezależną stronę ŻabHop."
+            exit 0
+          fi
+
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "::warning::GitHub Pages nie przyjął planowej aktualizacji po trzech próbach; dotychczasowa strona pozostaje dostępna."
+            exit 0
+          fi
+
+          echo "::error::Nie udało się opublikować zmian po trzech próbach."
+          exit 1

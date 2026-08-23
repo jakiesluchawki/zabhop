@@ -1,5 +1,5 @@
 import { formatPlanTime, timeToMinutes, validatePlanSafety } from "./planner.js";
-import { showScheduleFreshness, showsOnDate } from "./shows.js";
+import { mergeOfficialShowCalendar, showScheduleFreshness, showsOnDate } from "./shows.js";
 
 const MIN_FINAL_BUFFER_MINUTES = 60;
 const MAX_WAIT_FOR_SHOW_MINUTES = 60;
@@ -85,14 +85,15 @@ function addShowToDay(day, candidate, departure) {
  * only uses an already-reserved final flex window, so a successful insertion
  * cannot delete a ride, meal break or the final 60-minute safety buffer.
  */
-export function overlayShowsOnPlan(basePlan, showData, { now = Date.now() } = {}) {
+export function overlayShowsOnPlan(basePlan, showData, { now = Date.now(), parkCalendar = null } = {}) {
   if (!basePlan?.profile?.entertainment?.includeShows) return basePlan;
-  const freshness = showScheduleFreshness(showData, now);
+  const currentShows = parkCalendar ? mergeOfficialShowCalendar(showData, parkCalendar, { now }) : showData;
+  const freshness = showScheduleFreshness(currentShows, now);
   if (freshness.state !== "fresh") return basePlan;
   const departure = timeToMinutes(basePlan.profile.departureTime, 1_200);
   const days = basePlan.days.map(cloneDay).map((day, dayIndex) => {
     const dateKey = dateForDay(basePlan, dayIndex);
-    const shows = showsOnDate(showData, dateKey, { schedulableOnly: true }).filter((show) => Boolean(show.mapUrl));
+    const shows = showsOnDate(currentShows, dateKey, { schedulableOnly: true }).filter((show) => Boolean(show.mapUrl));
     const candidate = candidateForDay(day, shows, departure);
     return candidate ? addShowToDay(day, candidate, departure) : day;
   });
