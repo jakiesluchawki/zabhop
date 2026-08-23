@@ -56,17 +56,31 @@ Domyślnie Xcode zarządza podpisem automatycznie. Jeżeli certyfikat dystrybucy
 ```sh
 ZABHOP_SIGNING_KEYCHAIN_PATH='/ścieżka/do/pęku-kluczy.keychain-db' \
 ZABHOP_SIGNING_IDENTITY='odcisk-SHA1-certyfikatu-dystrybucyjnego' \
+sh Tools/CheckAppStoreConnect.sh --prepare-signing
+
+ZABHOP_SIGNING_KEYCHAIN_PATH='/ścieżka/do/pęku-kluczy.keychain-db' \
+ZABHOP_SIGNING_IDENTITY='odcisk-SHA1-certyfikatu-dystrybucyjnego' \
 ZABHOP_PROVISIONING_PROFILE_SPECIFIER='nazwa-profilu-App-Store-ŻabHop' \
 ZABHOP_SIGNING_KEYCHAIN_PASSWORD_FILE='/ścieżka/do/lokalnego-pliku-z-hasłem' \
 sh Tools/ReleaseTestFlight.sh
 ```
 
-Plik hasła jest opcjonalny, jeśli pęk został już odblokowany. Przy jego podaniu skrypt odblokowuje wyłącznie wskazany istniejący pęk kluczy; nie wypisuje hasła, nie zapisuje go w repozytorium ani nie zmienia listy pęków czy uprawnień klucza. Podpis ręczny wymaga ręcznie zarządzanego profilu i wykorzystuje tę samą tożsamość podczas tworzenia archiwum oraz wysyłki do TestFlight.
+Polecenie `--prepare-signing` sprawdza dokładny odcisk istniejącego certyfikatu oraz identyfikator aplikacji, odnajduje albo tworzy ręcznie zarządzany profil App Store wyłącznie dla ŻabHop i instaluje go lokalnie. Nie generuje nowego certyfikatu ani nie korzysta z innych pęków kluczy. Plik hasła jest opcjonalny, jeśli pęk został już odblokowany. Przy jego podaniu skrypt odblokowuje wyłącznie wskazany istniejący pęk kluczy; nie wypisuje hasła, nie zapisuje go w repozytorium ani nie zmienia listy pęków czy uprawnień klucza. Podpis ręczny wymaga ręcznie zarządzanego profilu i wykorzystuje tę samą tożsamość podczas tworzenia archiwum oraz wysyłki do TestFlight.
 
 Jeżeli dostępny profil dystrybucyjny jest zarządzany automatycznie przez Xcode, można przygotować niepodpisane archiwum; prawidłowy podpis App Store zostanie zastosowany automatycznie dopiero podczas eksportu i wysyłki:
 
 ```sh
 ZABHOP_ARCHIVE_SIGNING_MODE=unsigned sh Tools/ReleaseTestFlight.sh
+```
+
+Istniejące, wcześniej sprawdzone archiwum można wysłać ponownie bez powtarzania testów i kompilacji. Wymaga ono jawnie wskazanego archiwum oraz konfiguracji eksportu z ręcznym profilem dystrybucyjnym ŻabHop:
+
+```sh
+ZABHOP_EXISTING_ARCHIVE_PATH='/ścieżka/do/ZabHop.xcarchive' \
+ZABHOP_EXPORT_OPTIONS_PATH='/ścieżka/do/ExportOptions-TestFlight.plist' \
+ZABHOP_SIGNING_IDENTITY='odcisk-SHA1-certyfikatu-dystrybucyjnego' \
+ZABHOP_PROVISIONING_PROFILE_SPECIFIER='nazwa-profilu-App-Store-ŻabHop' \
+sh Tools/UploadExistingArchive.sh
 ```
 
 ```sh

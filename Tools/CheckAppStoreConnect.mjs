@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
-import { createPrivateKey, sign } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { X509Certificate, createPrivateKey, sign } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import path from "node:path";
 import process from "node:process";
 
 const keyPath = process.env.ZABHOP_ASC_KEY_PATH;
@@ -75,6 +78,166 @@ async function findApp() {
   const app = result.json.data?.[0];
   if (!app) throw new Error(`No App Store Connect application exists for ${bundleId}.`);
   return app;
+}
+
+function normalizedFingerprint(value) {
+  return String(value || "").replace(/[^a-fA-F0-9]/g, "").toUpperCase();
+}
+
+function readRequestedDistributionCertificate(expectedFingerprint) {
+  const keychainPath = process.env.ZABHOP_SIGNING_KEYCHAIN_PATH?.trim();
+  if (!keychainPath) {
+    throw new Error("Set ZABHOP_SIGNING_KEYCHAIN_PATH to the existing ŻabHop distribution signing keychain.");
+  }
+
+  const result = spawnSync("/usr/bin/security", [
+    "find-certificate", "-c", "Apple Distribution", "-p", keychainPath
+  ], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.error || result.status !== 0 || !result.stdout) {
+    throw new Error("Unable to read the public certificate from the specified ŻabHop signing keychain.");
+  }
+
+  const certificate = new X509Certificate(result.stdout);
+  if (normalizedFingerprint(certificate.fingerprint) !== expectedFingerprint) {
+    throw new Error("The specified keychain certificate does not match the requested ŻabHop signing fingerprint.");
+  }
+  return certificate;
+}
+
+function matchesExistingDistributionCertificate(resource, expectedFingerprint, localCertificate) {
+  const attributes = resource.attributes || {};
+  if (!["DISTRIBUTION", "IOS_DISTRIBUTION"].includes(attributes.certificateType)) return false;
+  if (attributes.expirationDate && Date.parse(attributes.expirationDate) <= Date.now()) return false;
+
+  if (attributes.certificateContent) {
+    try {
+      const certificate = new X509Certificate(Buffer.from(attributes.certificateContent, "base64"));
+      return normalizedFingerprint(certificate.fingerprint) === expectedFingerprint;
+    } catch {
+      return false;
+    }
+  }
+
+  return normalizedFingerprint(attributes.serialNumber)
+    === normalizedFingerprint(localCertificate.serialNumber);
+}
+
+async function prepareSigning() {
+  const expectedFingerprint = normalizedFingerprint(process.env.ZABHOP_SIGNING_IDENTITY);
+  if (!/^[A-F0-9]{40}$/.test(expectedFingerprint)) {
+    throw new Error("Set ZABHOP_SIGNING_IDENTITY to the SHA-1 fingerprint of the existing ŻabHop distribution certificate.");
+  }
+  const localCertificate = readRequestedDistributionCertificate(expectedFingerprint);
+
+  const [bundleResult, certificateResult] = await Promise.all([
+    request("GET", "/v1/bundleIds", {
+      params: {
+        "filter[identifier]": bundleId,
+        "fields[bundleIds]": "identifier,name,platform",
+        limit: "1"
+      }
+    }),
+    request("GET", "/v1/certificates", {
+      params: {
+        "fields[certificates]": "name,certificateType,certificateContent,serialNumber,expirationDate",
+        limit: "200"
+      }
+    })
+  ]);
+  requireSuccess(bundleResult, "Unable to find the exact ŻabHop signing bundle identifier");
+  requireSuccess(certificateResult, "Unable to inspect existing App Store distribution certificates");
+
+  const bundle = bundleResult.json.data?.[0];
+  if (!bundle || bundle.attributes?.identifier !== bundleId) {
+    throw new Error(`No exact signing bundle identifier exists for ${bundleId}.`);
+  }
+  const certificate = (certificateResult.json.data || []).find((resource) =>
+    matchesExistingDistributionCertificate(resource, expectedFingerprint, localCertificate)
+  );
+  if (!certificate) {
+    throw new Error("The specified existing ŻabHop distribution certificate is unavailable in App Store Connect.");
+  }
+
+  const profileList = requireSuccess(await request("GET", "/v1/profiles", {
+    params: {
+      "filter[profileType]": "IOS_APP_STORE",
+      "fields[profiles]": "name,profileType,profileState,uuid,expirationDate,bundleId,certificates",
+      include: "bundleId,certificates",
+      limit: "200"
+    }
+  }), "Unable to inspect existing App Store provisioning profiles");
+
+  const desiredName = process.env.ZABHOP_SIGNING_PROFILE_NAME?.trim()
+    || "ZabHop TestFlight Distribution";
+  let profile = (profileList.json.data || []).find((candidate) => {
+    const attributes = candidate.attributes || {};
+    const linkedBundleId = candidate.relationships?.bundleId?.data?.id;
+    const linkedCertificates = candidate.relationships?.certificates?.data || [];
+    return linkedBundleId === bundle.id
+      && linkedCertificates.some((linked) => linked.id === certificate.id)
+      && attributes.profileState === "ACTIVE"
+      && (!attributes.expirationDate || Date.parse(attributes.expirationDate) > Date.now())
+      && !/^(?:iOS Team(?: Store)? Provisioning Profile:|XC\s)/i.test(attributes.name || "");
+  });
+
+  let created = false;
+  if (!profile) {
+    const createdProfile = requireSuccess(await request("POST", "/v1/profiles", {
+      body: {
+        data: {
+          type: "profiles",
+          attributes: { name: desiredName, profileType: "IOS_APP_STORE" },
+          relationships: {
+            bundleId: { data: { type: "bundleIds", id: bundle.id } },
+            certificates: { data: [{ type: "certificates", id: certificate.id }] }
+          }
+        }
+      }
+    }), "Unable to create a manual ŻabHop App Store profile for the existing selected certificate");
+    profile = createdProfile.json.data;
+    created = true;
+  }
+
+  if (!profile.attributes?.profileContent) {
+    const downloadedProfile = requireSuccess(await request("GET", `/v1/profiles/${profile.id}`, {
+      params: {
+        "fields[profiles]": "name,profileType,profileState,uuid,profileContent,expirationDate"
+      }
+    }), "Unable to download the selected manual ŻabHop App Store provisioning profile");
+    profile = downloadedProfile.json.data;
+  }
+
+  const { name, uuid, profileContent, expirationDate, profileType } = profile.attributes || {};
+  if (!name || !uuid || !profileContent || profileType !== "IOS_APP_STORE") {
+    throw new Error("The selected manual provisioning profile is missing required installation data.");
+  }
+  if (!/^[a-zA-Z0-9-]+$/.test(uuid)) {
+    throw new Error("The selected provisioning profile has an invalid identifier.");
+  }
+
+  const bytes = Buffer.from(profileContent, "base64");
+  if (bytes.length < 1_024) throw new Error("The downloaded provisioning profile is incomplete.");
+  const directory = path.join(
+    homedir(), "Library", "Developer", "Xcode", "UserData", "Provisioning Profiles"
+  );
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const installedPath = path.join(directory, `${uuid}.mobileprovision`);
+  writeFileSync(installedPath, bytes, { mode: 0o600 });
+  chmodSync(installedPath, 0o600);
+
+  console.log(JSON.stringify({
+    created,
+    bundleId,
+    profileName: name,
+    profileUUID: uuid,
+    profileType,
+    expirationDate,
+    signingCertificateFingerprint: expectedFingerprint,
+    installedPath
+  }, null, 2));
 }
 
 function getBuilds(appId) {
@@ -285,10 +448,12 @@ async function submitExternal() {
 
 if (process.argv.includes("--builds")) {
   await inspectBuilds();
+} else if (process.argv.includes("--prepare-signing")) {
+  await prepareSigning();
 } else if (process.argv.includes("--inspect-external") || process.argv.includes("--testflight")) {
   await inspectExternal();
 } else if (process.argv.includes("--submit-external")) {
   await submitExternal();
 } else {
-  throw new Error("Usage: CheckAppStoreConnect.sh --builds | --inspect-external | --submit-external");
+  throw new Error("Usage: CheckAppStoreConnect.sh --builds | --prepare-signing | --inspect-external | --submit-external");
 }
