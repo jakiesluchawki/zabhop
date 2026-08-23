@@ -1,0 +1,141 @@
+name: Publish ŻabHop
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "assets/**"
+      - "fonts/**"
+      - "*.html"
+      - "*.js"
+      - "*.css"
+      - "*.json"
+      - "*.png"
+      - "*.jpg"
+      - "*.webp"
+      - "*.webmanifest"
+      - ".github/workflows/publish-zabhop.yml"
+      - ".github/workflows/refresh-zabka-catalog.yml"
+      - ".github/workflows/refresh-other-stores.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out canonical ŻabHop website
+        uses: actions/checkout@v4
+
+      - name: Find the latest successfully published shared Pages snapshot
+        id: snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_ids="$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs" \
+            --method GET \
+            -f branch=main \
+            -f status=success \
+            -F per_page=50 \
+            --jq '.workflow_runs[] | select(.path == ".github/workflows/publish-zabhop.yml" or .path == ".github/workflows/update-energylandia.yml") | .id')"
+
+          for run_id in $run_ids; do
+            artifact_id="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" \
+              --jq '.artifacts[] | select(.name == "github-pages" and .expired == false) | .id' \
+              | head -n 1)"
+            if [ -n "$artifact_id" ]; then
+              printf 'run-id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+              printf 'Reusing validated shared Pages snapshot from run %s.\n' "$run_id"
+              exit 0
+            fi
+          done
+
+          printf '%s\n' 'No unexpired successful shared Pages snapshot is available.' >&2
+          exit 1
+
+      - name: Download the previous successful Pages snapshot
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/zabhop-pages-snapshot
+          run-id: ${{ steps.snapshot.outputs.run-id }}
+          github-token: ${{ github.token }}
+
+      - name: Restore and validate existing Energylandia websites
+        run: |
+          mkdir -p _site
+          tar --extract \
+            --file "$RUNNER_TEMP/zabhop-pages-snapshot/artifact.tar" \
+            --directory _site \
+            ./pogoda-energylandia \
+            ./planer-energylandia
+
+          test -f _site/pogoda-energylandia/index.html \
+            || { echo 'Missing previously published pogoda-energylandia website.' >&2; exit 1; }
+          test -f _site/planer-energylandia/index.html \
+            || { echo 'Missing previously published planer-energylandia website.' >&2; exit 1; }
+
+      - name: Overlay only the canonical ŻabHop static website
+        run: |
+          rsync -a \
+            --exclude .git \
+            --exclude .github \
+            --exclude .gitignore \
+            --exclude .local \
+            --exclude _site \
+            --exclude apps \
+            --exclude services \
+            --exclude ZabHop \
+            --exclude ZabHopTests \
+            --exclude ZabHop.xcodeproj \
+            --exclude Tools \
+            --exclude tests \
+            --exclude qa \
+            --exclude README.md \
+            --exclude design-qa.md \
+            --exclude pogoda-energylandia \
+            --exclude planer-energylandia \
+            ./ _site/
+
+          test -f _site/index.html
+          test -f _site/app.js
+          test -f _site/pogoda-energylandia/index.html
+          test -f _site/planer-energylandia/index.html
+          for private_directory in .git .github .local apps services ZabHop ZabHopTests ZabHop.xcodeproj Tools tests qa; do
+            test ! -e "_site/$private_directory" \
+              || { echo "Unexpected private project content: $private_directory" >&2; exit 1; }
+          done
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Package the independently updated website
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+          retention-days: 30
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    timeout-minutes: 10
+    steps:
+      - name: Publish ŻabHop while preserving both Energylandia websites
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,4 +1,4 @@
-name: Update Energylandia navigator
+name: Publish Energylandia websites
 
 on:
   push:
@@ -8,11 +8,6 @@ on:
       - "apps/pogoda-energylandia/**"
       - "apps/planer-energylandia/**"
       - "pogoda-energylandia/**"
-      - "stores.json"
-      - "stores-manifest.json"
-      - "privacy.html"
-      - "sw.js"
-      - ".github/workflows/refresh-zabka-catalog.yml"
       - ".github/workflows/update-energylandia.yml"
   workflow_dispatch:
   schedule:
@@ -25,7 +20,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -85,12 +80,26 @@ jobs:
           rsync -a \
             --exclude .git \
             --exclude .github \
+            --exclude .gitignore \
+            --exclude .local \
             --exclude apps \
             --exclude services \
             --exclude _site \
+            --exclude ZabHop \
+            --exclude ZabHopTests \
+            --exclude ZabHop.xcodeproj \
+            --exclude Tools \
+            --exclude tests \
+            --exclude qa \
+            --exclude README.md \
+            --exclude design-qa.md \
             ./ _site/
           rsync -a --delete apps/pogoda-energylandia/dist/ _site/pogoda-energylandia/
           rsync -a --delete apps/planer-energylandia/dist/ _site/planer-energylandia/
+          for private_directory in .git .github .local apps services ZabHop ZabHopTests ZabHop.xcodeproj Tools tests qa; do
+            test ! -e "_site/$private_directory" \
+              || { echo "Unexpected private project content: $private_directory" >&2; exit 1; }
+          done
 
       - name: Skonfiguruj GitHub Pages
         uses: actions/configure-pages@v5
@@ -99,6 +108,7 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+          retention-days: 30
 
   deploy:
     environment:

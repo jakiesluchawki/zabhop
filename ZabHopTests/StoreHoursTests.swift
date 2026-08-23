@@ -7,14 +7,50 @@ final class StoreHoursTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let catalogData = try Data(contentsOf: root.appendingPathComponent("web/stores.json"))
-        let manifestData = try Data(contentsOf: root.appendingPathComponent("web/stores-manifest.json"))
+        let catalogURL = root.appendingPathComponent("stores.json")
+        let catalogData = try Data(contentsOf: catalogURL)
+        let manifestData = try Data(contentsOf: root.appendingPathComponent("stores-manifest.json"))
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         let manifest = try decoder.decode(StoreCatalogUpdateService.Manifest.self, from: manifestData)
 
         XCTAssertNoThrow(try StoreCatalogUpdateService.validate(data: catalogData, manifest: manifest))
-        XCTAssertEqual(manifest.storeCount, 13_213)
+        XCTAssertEqual(manifest.storeCount, try JSONDecoder().decode([BundledStoreRecord].self, from: catalogData).count)
+        XCTAssertGreaterThanOrEqual(manifest.storeCount, 10_000)
+        XCTAssertTrue(try StoreCatalogUpdateService.catalog(at: catalogURL, matches: manifest))
+        XCTAssertTrue(try StoreCatalogUpdateService.catalog(
+            at: root.appendingPathComponent("ZabHop/Resources/stores.json"),
+            matches: manifest
+        ))
+    }
+
+    func testPublishedOtherStoreManifestMatchesBundledCatalog() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let catalogURL = root.appendingPathComponent("other-stores.json")
+        let catalogData = try Data(contentsOf: catalogURL)
+        let manifestData = try Data(contentsOf: root.appendingPathComponent("other-stores-manifest.json"))
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let manifest = try decoder.decode(StoreCatalogUpdateService.Manifest.self, from: manifestData)
+
+        XCTAssertNoThrow(try StoreCatalogUpdateService.validate(data: catalogData, manifest: manifest, for: .other))
+        XCTAssertEqual(manifest.storeCount, try JSONDecoder().decode([BundledOtherStoreRecord].self, from: catalogData).count)
+        XCTAssertTrue(try StoreCatalogUpdateService.catalog(
+            at: root.appendingPathComponent("ZabHop/Resources/other-stores.json"),
+            matches: manifest
+        ))
+    }
+
+    func testCatalogKindsUseRawGitHubAndIndependentRefreshIntervals() {
+        XCTAssertEqual(
+            StoreCatalogUpdateService.catalogBaseURL.absoluteString,
+            "https://raw.githubusercontent.com/jakiesluchawki/zabhop/main/"
+        )
+        XCTAssertEqual(StoreCatalogUpdateService.Catalog.zabka.successfulCheckInterval, 86_400)
+        XCTAssertEqual(StoreCatalogUpdateService.Catalog.other.successfulCheckInterval, 604_800)
+        XCTAssertEqual(StoreCatalogUpdateService.Catalog.other.manifestPath, "other-stores-manifest.json")
     }
 
     func testOfficialMidnightSentinelIsUnknownAndFalseMeansClosed() throws {
@@ -118,6 +154,45 @@ final class StoreHoursTests: XCTestCase {
 
         XCTAssertEqual(hours.status(at: isoDate("2026-07-11T20:30:00Z")).state, .open)
         XCTAssertEqual(hours.status(at: isoDate("2026-07-11T21:30:00Z")).state, .closed)
+    }
+
+    func testOpenStoreWarnsWhenClosingWithinFortyFiveMinutes() throws {
+        let hours = try XCTUnwrap(StoreHours(Array(repeating: "360-1380", count: 7)))
+        let status = hours.status(at: isoDate("2026-07-11T20:48:00Z")) // 22:48 in Warsaw.
+
+        XCTAssertEqual(status.state, .open)
+        XCTAssertEqual(status.transition, StoreOpeningTransition(kind: .closing, minutesRemaining: 12))
+        XCTAssertEqual(status.label, "Zamyka się za 12 min")
+        XCTAssertEqual(status.badge, "ZAMYKA ZA 12 MIN")
+    }
+
+    func testClosedStoreWarnsWhenOpeningWithinAnHour() throws {
+        let hours = try XCTUnwrap(StoreHours(Array(repeating: "360-1380", count: 7)))
+        let status = hours.status(at: isoDate("2026-07-11T03:38:00Z")) // 05:38 in Warsaw.
+
+        XCTAssertEqual(status.state, .closed)
+        XCTAssertEqual(status.transition, StoreOpeningTransition(kind: .opening, minutesRemaining: 22))
+        XCTAssertEqual(status.label, "Otwiera się za 22 min")
+    }
+
+    func testOvernightContinuationDoesNotFalselyWarnAtMidnight() throws {
+        let hours = try XCTUnwrap(StoreHours([
+            "360-1440", "0-120,360-1440", "0-120,360-1440",
+            "0-120,360-1440", "0-120,360-1440", "0-120,360-1440", "0-120"
+        ]))
+        let status = hours.status(at: isoDate("2026-07-10T21:45:00Z")) // Friday 23:45.
+
+        XCTAssertEqual(status.state, .open)
+        XCTAssertNil(status.transition)
+    }
+
+    func testTwentyFourHourStoreNeverShowsClosingSoon() throws {
+        let hours = try XCTUnwrap(StoreHours(Array(repeating: "0-1440", count: 7)))
+        let status = hours.status(at: isoDate("2026-07-10T21:55:00Z")) // Friday 23:55.
+
+        XCTAssertEqual(status.state, .open)
+        XCTAssertNil(status.transition)
+        XCTAssertEqual(status.label, "Otwarte teraz")
     }
 
     func testUnknownHoursAreNeverTreatedAsOpen() throws {
@@ -256,6 +331,132 @@ final class StoreHoursTests: XCTestCase {
         )
     }
 
+    func testOtherStoresWithUnknownHoursRemainVisibleBehindNearbyConfirmedStores() throws {
+        let openDays = Array(repeating: "0-1440", count: 7)
+        let closedDays = Array(repeating: "", count: 7)
+        let rows: [[String: Any]] = [
+            ["id": "unknown-nearest", "name": "Biedronka", "lat": 52.2001, "lon": 21.0,
+             "street": "Bliska 1", "town": "Warszawa"],
+            ["id": "open-nearby", "name": "Lidl", "lat": 52.203, "lon": 21.0,
+             "street": "Pewna 2", "town": "Warszawa", "hours": openDays],
+            ["id": "closed-nearest", "name": "Dino", "lat": 52.20005, "lon": 21.0,
+             "street": "Zamknięta 3", "town": "Warszawa", "hours": closedDays]
+        ]
+        let data = try JSONSerialization.data(withJSONObject: rows)
+        let records = try JSONDecoder().decode([BundledOtherStoreRecord].self, from: data)
+
+        let ranked = BundledOtherStoreCatalog.nearestRecords(
+            in: records,
+            latitude: 52.2,
+            longitude: 21.0,
+            limit: 5,
+            availability: .openNow,
+            at: isoDate("2026-07-11T12:00:00Z")
+        )
+
+        XCTAssertEqual(ranked.map(\.id), ["open-nearby", "unknown-nearest"])
+        XCTAssertEqual(ranked.last?.openingStatus(at: Date()).label, "Godziny niepotwierdzone")
+        XCTAssertTrue(StoreOpeningPolicy.isOpenNowCandidate(.unknown, mode: .other))
+        XCTAssertFalse(StoreOpeningPolicy.isOpenNowCandidate(.unknown, mode: .zabka))
+    }
+
+    func testShopClosingBeforeWalkingArrivalReceivesDistancePenalty() {
+        let closesBeforeArrival = StoreOpenStatus(
+            state: .open,
+            label: "Zamyka się za 12 min",
+            badge: "ZAMYKA ZA 12 MIN",
+            transition: StoreOpeningTransition(kind: .closing, minutesRemaining: 12)
+        )
+        let reachableBeforeClosing = StoreOpenStatus(
+            state: .open,
+            label: "Zamyka się za 20 min",
+            badge: "ZAMYKA ZA 20 MIN",
+            transition: StoreOpeningTransition(kind: .closing, minutesRemaining: 20)
+        )
+
+        XCTAssertEqual(
+            StoreOpeningPolicy.rankingScore(
+                distance: 1_100,
+                assessedStatus: closesBeforeArrival,
+                availability: .openNow
+            ),
+            2_500
+        )
+        XCTAssertEqual(
+            StoreOpeningPolicy.rankingScore(
+                distance: 1_100,
+                assessedStatus: reachableBeforeClosing,
+                availability: .openNow
+            ),
+            1_100
+        )
+        XCTAssertEqual(
+            StoreOpeningPolicy.rankingScore(
+                distance: 1_100,
+                assessedStatus: closesBeforeArrival,
+                availability: .planning
+            ),
+            1_100
+        )
+        XCTAssertEqual(
+            StoreOpeningPolicy.rankingScore(
+                distance: 20,
+                assessedStatus: StoreOpenStatus(
+                    state: .open,
+                    label: "Zamyka się za 1 min",
+                    badge: "ZAMYKA ZA 1 MIN",
+                    transition: StoreOpeningTransition(kind: .closing, minutesRemaining: 1)
+                ),
+                availability: .openNow
+            ),
+            20
+        )
+    }
+
+    func testBothCatalogsPreferStoresReachableBeforeClosing() throws {
+        let closingHours = Array(repeating: "480-1200", count: 7)
+        let laterHours = Array(repeating: "480-1380", count: 7)
+        let date = isoDate("2026-08-24T17:48:00Z") // 19:48 in Warsaw.
+
+        let zabkaRows: [[Any]] = [
+            ["closes-before-arrival", 52.2099, 21.0, "Zamykana 1", "Warszawa", closingHours],
+            ["stays-open", 52.212, 21.0, "Dłużej 2", "Warszawa", laterHours]
+        ]
+        let zabkaRecords = try JSONDecoder().decode(
+            [BundledStoreRecord].self,
+            from: JSONSerialization.data(withJSONObject: zabkaRows)
+        )
+        let rankedZabkas = BundledStoreCatalog.nearestRecords(
+            in: zabkaRecords,
+            latitude: 52.2,
+            longitude: 21.0,
+            limit: 2,
+            availability: .openNow,
+            at: date
+        )
+        XCTAssertEqual(rankedZabkas.map(\.id), ["stays-open", "closes-before-arrival"])
+
+        let otherRows: [[String: Any]] = [
+            ["id": "closes-before-arrival", "name": "Biedronka", "lat": 52.2099, "lon": 21.0,
+             "street": "Zamykana 1", "town": "Warszawa", "hours": closingHours],
+            ["id": "stays-open", "name": "Lidl", "lat": 52.212, "lon": 21.0,
+             "street": "Dłużej 2", "town": "Warszawa", "hours": laterHours]
+        ]
+        let otherRecords = try JSONDecoder().decode(
+            [BundledOtherStoreRecord].self,
+            from: JSONSerialization.data(withJSONObject: otherRows)
+        )
+        let rankedOtherStores = BundledOtherStoreCatalog.nearestRecords(
+            in: otherRecords,
+            latitude: 52.2,
+            longitude: 21.0,
+            limit: 2,
+            availability: .openNow,
+            at: date
+        )
+        XCTAssertEqual(rankedOtherStores.map(\.id), ["stays-open", "closes-before-arrival"])
+    }
+
     func testRecognizesFixedAndMovablePolishHolidays() {
         XCTAssertTrue(StoreHours.isPolishPublicHoliday(year: 2026, month: 12, day: 24))
         XCTAssertTrue(StoreHours.isPolishPublicHoliday(year: 2026, month: 4, day: 6))
@@ -301,7 +502,7 @@ final class StoreHoursTests: XCTestCase {
         XCTAssertEqual(record.openingStatus(at: Date()).state, .unknown)
     }
 
-    func testBundledDolnaStoreCarriesEvaluableOfficialHours() throws {
+    func testBundledCatalogContainsEvaluableOfficialHours() throws {
         let catalogURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -310,39 +511,46 @@ final class StoreHoursTests: XCTestCase {
             [BundledStoreRecord].self,
             from: Data(contentsOf: catalogURL)
         )
-        let dolna = try XCTUnwrap(records.first { $0.id == "ZG162" })
+        let storeWithKnownSaturday = try XCTUnwrap(records.first {
+            $0.hours?.days[5] != nil
+        })
+        let status = storeWithKnownSaturday.openingStatus(at: isoDate("2026-07-11T12:30:00Z"))
 
-        XCTAssertEqual(dolna.openingStatus(at: isoDate("2026-07-11T20:30:00Z")).state, .open)
-        XCTAssertEqual(dolna.openingStatus(at: isoDate("2026-07-11T21:30:00Z")).state, .closed)
+        XCTAssertTrue(status.state == .open || status.state == .closed)
     }
 
-    func testBundledZatorSundaySentinelRemainsUnknown() throws {
-        let catalogURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("ZabHop/Resources/stores.json")
+    func testUnknownSundayFixtureRemainsUnknown() throws {
+        let rows: [[Any]] = [[
+            "unknown-sunday", 49.9942, 19.4224, "Jana Pawła II", "Zator",
+            ["360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "360-1380", NSNull()]
+        ]]
         let records = try JSONDecoder().decode(
             [BundledStoreRecord].self,
-            from: Data(contentsOf: catalogURL)
+            from: JSONSerialization.data(withJSONObject: rows)
         )
         let screenshotMoment = isoDate("2026-07-11T22:25:00Z") // Sunday 00:25 in Zator.
 
-        let store = try XCTUnwrap(records.first { $0.id == "ZE315" })
+        let store = try XCTUnwrap(records.first)
         XCTAssertNil(store.hours?.days[6])
         XCTAssertEqual(store.openingStatus(at: screenshotMoment).state, .unknown)
     }
 
-    func testZatorAtNineTwentyEightRanksNearbyUnknownZabkaAsProbablyOpen() throws {
-        let catalogURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("ZabHop/Resources/stores.json")
+    func testNearbyUnknownZabkaRanksAsProbablyOpenUsingStableFixture() throws {
+        let allDay = Array(repeating: "0-1440", count: 7)
+        let unknownSunday: [Any] = [
+            "360-1380", "360-1380", "360-1380", "360-1380", "360-1380", "360-1380", NSNull()
+        ]
+        let rows: [[Any]] = [
+            ["confirmed-nearby", 49.9972, 19.4224, "Pewna", "Zator", allDay],
+            ["unknown-closer", 49.9952, 19.4224, "Bliska", "Zator", unknownSunday],
+            ["confirmed-farther", 50.0002, 19.4224, "Dalsza", "Zator", allDay]
+        ]
         let records = try JSONDecoder().decode(
             [BundledStoreRecord].self,
-            from: Data(contentsOf: catalogURL)
+            from: JSONSerialization.data(withJSONObject: rows)
         )
         let screenshotMoment = isoDate("2026-07-12T07:28:00Z") // Sunday 09:28 in Zator.
-        let janaPawla = try XCTUnwrap(records.first { $0.id == "ZE315" })
+        let janaPawla = try XCTUnwrap(records.first { $0.id == "unknown-closer" })
 
         XCTAssertEqual(janaPawla.openingStatus(at: screenshotMoment).state, .unknown)
 
@@ -363,31 +571,28 @@ final class StoreHoursTests: XCTestCase {
             availability: .openNow,
             at: screenshotMoment
         )
-        XCTAssertEqual(openNow.first?.id, "ZB158")
-        XCTAssertTrue(openNow.contains { $0.id == "ZE315" }, "Closer probably-open store stays available")
-        XCTAssertTrue(openNow.contains { $0.id == "Z3298" }, "Confirmed-open Wadowicka store stays available")
+        XCTAssertEqual(openNow.first?.id, "confirmed-nearby")
+        XCTAssertTrue(openNow.contains { $0.id == "unknown-closer" }, "Closer probably-open store stays available")
+        XCTAssertTrue(openNow.contains { $0.id == "confirmed-farther" }, "Confirmed-open store stays available")
     }
 
-    func testBundledStaleOSMAllDayClaimsFromScreenshotStayUnknown() throws {
-        let catalogURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("ZabHop/Resources/other-stores.json")
+    func testOtherStoreFixturesKeepUnconfirmedAndVerifiedAllDayHoursDistinct() throws {
+        let rows: [[String: Any]] = [
+            ["id": "unconfirmed", "name": "Dino", "lat": 49.9942, "lon": 19.4224,
+             "street": "Testowa 1", "town": "Zator"],
+            ["id": "verified-all-day", "name": "Carrefour Express", "lat": 49.9952, "lon": 19.4224,
+             "street": "Testowa 2", "town": "Zator", "hours": Array(repeating: "0-1440", count: 7)]
+        ]
         let records = try JSONDecoder().decode(
             [BundledOtherStoreRecord].self,
-            from: Data(contentsOf: catalogURL)
+            from: JSONSerialization.data(withJSONObject: rows)
         )
 
-        for id in [
-            "osm-n-2696878132", "osm-w-889502145", "osm-n-12805812035",
-            "osm-n-3368741951", "osm-n-2000515371"
-        ] {
-            let store = try XCTUnwrap(records.first { $0.id == id })
-            XCTAssertNil(store.hours, "\(id) must remain unconfirmed")
-            XCTAssertEqual(store.openingStatus(at: isoDate("2026-07-11T22:25:00Z")).state, .unknown)
-        }
+        let unconfirmed = try XCTUnwrap(records.first { $0.id == "unconfirmed" })
+        XCTAssertNil(unconfirmed.hours)
+        XCTAssertEqual(unconfirmed.openingStatus(at: isoDate("2026-07-11T22:25:00Z")).state, .unknown)
 
-        let recentlyChecked = try XCTUnwrap(records.first { $0.id == "osm-n-5254419323" })
+        let recentlyChecked = try XCTUnwrap(records.first { $0.id == "verified-all-day" })
         XCTAssertEqual(recentlyChecked.hours?.days, Array(repeating: "0-1440", count: 7))
     }
 

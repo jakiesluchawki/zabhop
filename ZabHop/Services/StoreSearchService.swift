@@ -25,11 +25,25 @@ final class StoreSearchService: ObservableObject {
     private var searchGeneration = 0
     private let catalogUpdater = StoreCatalogUpdateService()
 
-    func refreshCatalogIfNeeded() async -> Bool {
-        switch await catalogUpdater.checkForUpdate() {
+    func refreshCatalogIfNeeded(mode: StoreMode = .zabka, force: Bool = false) async -> Bool {
+        let catalog: StoreCatalogUpdateService.Catalog = mode == .zabka ? .zabka : .other
+        let bundledURL = mode == .zabka
+            ? Self.bundledStoreCatalogURL()
+            : Self.bundledOtherStoreCatalogURL()
+
+        switch await catalogUpdater.checkForUpdate(
+            catalog: catalog,
+            bundledCatalogURL: bundledURL,
+            force: force
+        ) {
         case .updated(let url):
             do {
-                bundledRecords = try await BundledStoreCatalog.load(from: url)
+                switch catalog {
+                case .zabka:
+                    bundledRecords = try await BundledStoreCatalog.load(from: url)
+                case .other:
+                    bundledOtherRecords = try await BundledOtherStoreCatalog.load(from: url)
+                }
                 return true
             } catch {
                 return false
@@ -132,7 +146,8 @@ final class StoreSearchService: ObservableObject {
                     )
                 }
                 .filter {
-                    availability == .planning || StoreOpeningPolicy.isOpenNowCandidate($0.assessedStatus)
+                    availability == .planning
+                        || StoreOpeningPolicy.isOpenNowCandidate($0.assessedStatus, mode: mode)
                 }
                 .sorted { lhs, rhs in
                     if lhs.score != rhs.score { return lhs.score < rhs.score }
@@ -190,7 +205,7 @@ final class StoreSearchService: ObservableObject {
         if let bundledRecords {
             records = bundledRecords
         } else {
-            if let installedURL = await catalogUpdater.installedCatalogURL(),
+            if let installedURL = await catalogUpdater.installedCatalogURL(for: .zabka),
                let installedRecords = try? await BundledStoreCatalog.load(from: installedURL) {
                 records = installedRecords
             } else if let bundledURL = Self.bundledStoreCatalogURL() {
@@ -237,11 +252,14 @@ final class StoreSearchService: ObservableObject {
         if let bundledOtherRecords {
             records = bundledOtherRecords
         } else {
-            guard let resourceURL = Self.bundledOtherStoreCatalogURL() else {
+            if let installedURL = await catalogUpdater.installedCatalogURL(for: .other),
+               let installedRecords = try? await BundledOtherStoreCatalog.load(from: installedURL) {
+                records = installedRecords
+            } else if let resourceURL = Self.bundledOtherStoreCatalogURL() {
+                records = try await BundledOtherStoreCatalog.load(from: resourceURL)
+            } else {
                 throw BundledStoreCatalogError.resourceMissing
             }
-
-            records = try await BundledOtherStoreCatalog.load(from: resourceURL)
             bundledOtherRecords = records
         }
 
@@ -514,22 +532,31 @@ enum BundledOtherStoreCatalog {
         let moment = StoreHours.evaluationMoment(at: date)
 
         return records
-            .filter { record in
-                guard availability == .openNow else { return true }
-                guard let moment, let hours = record.hours else { return false }
-                return hours.status(
-                    at: moment,
-                    holidaysClosed: record.holidaysClosed
-                ).state == .open
-            }
             .map { record in
-                (record: record, distance: record.distance(latitude: latitude, longitude: longitude))
+                let distance = record.distance(latitude: latitude, longitude: longitude)
+                let status = moment.flatMap { moment in
+                    record.hours?.status(at: moment, holidaysClosed: record.holidaysClosed)
+                } ?? .unknown
+
+                return (
+                    record: record,
+                    distance: distance,
+                    score: StoreOpeningPolicy.rankingScore(
+                        distance: distance,
+                        assessedStatus: status,
+                        availability: availability
+                    ),
+                    status: status
+                )
+            }
+            .filter { candidate in
+                availability == .planning
+                    || StoreOpeningPolicy.isOpenNowCandidate(candidate.status, mode: .other)
             }
             .sorted { lhs, rhs in
-                if lhs.distance == rhs.distance {
-                    return lhs.record.id < rhs.record.id
-                }
-                return lhs.distance < rhs.distance
+                if lhs.score != rhs.score { return lhs.score < rhs.score }
+                if lhs.distance != rhs.distance { return lhs.distance < rhs.distance }
+                return lhs.record.id < rhs.record.id
             }
             .prefix(limit)
             .map(\.record)

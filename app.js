@@ -2,7 +2,8 @@
   "use strict";
 
   const { HeadingFilter, unwrapAngle } = window.ZabHopHeading;
-  const { availabilityStatusAt, parseOsmOpeningHours, rankStores } = window.ZabHopStoreHours;
+  const { availabilityStatusAt, estimateWalkingMinutes, parseOsmOpeningHours, rankStores } = window.ZabHopStoreHours;
+  const { createCatalogManager } = window.ZabHopCatalogSync;
   const { normalizeTheme, themeById, nextTheme } = window.ZabHopTheme;
 
   const $ = (selector) => document.querySelector(selector);
@@ -23,6 +24,7 @@
     errorMessage: $("#errorMessage"),
     distance: $("#distance"),
     distanceUnit: $("#distanceUnit"),
+    walkingEta: $("#walkingEta"),
     directionHint: $("#directionHint"),
     storeName: $("#storeName"),
     storeAddress: $("#storeAddress"),
@@ -43,7 +45,8 @@
     startEyebrow: $("#startEyebrow"),
     radarEyebrow: $("#radarEyebrow"),
     sheetTitle: $("#sheetTitle"),
-    sheetEyebrow: $("#sheetEyebrow")
+    sheetEyebrow: $("#sheetEyebrow"),
+    radarArtwork: [...document.querySelectorAll("[data-radar-src]")]
   };
 
   const CACHE_KEY = "zabhop-stores-v5";
@@ -52,6 +55,7 @@
   const headingFilter = new HeadingFilter();
   let officialStoreRows = null;
   let otherStoreRows = null;
+  let sheetReturnFocus = null;
 
   const modeCopy = {
     zabka: {
@@ -118,6 +122,27 @@
     wakeLock: null
   };
 
+  const catalogManager = createCatalogManager({
+    onUpdated(mode, rows) {
+      if (mode === "zabka") officialStoreRows = rows;
+      else otherStoreRows = rows;
+      try { localStorage.removeItem(cacheKey(mode)); } catch (_) { /* Optional cache. */ }
+      if (state.mode !== mode || !state.started || !state.position) return;
+      state.candidates = [];
+      state.lastSearchAt = 0;
+      window.setTimeout(() => {
+        void findStores(true);
+        toast(mode === "zabka" ? "Baza Żabek została zaktualizowana" : "Baza innych sklepów została zaktualizowana");
+      }, 0);
+    }
+  });
+
+  function checkCatalogForUpdates(mode = state.mode, force = false) {
+    void catalogManager.refresh(mode, { force }).catch(() => {
+      // The last verified catalog stays usable when GitHub or the network is unavailable.
+    });
+  }
+
   function showCard(name) {
     for (const card of [ui.startCard, ui.loadingCard, ui.radarCard, ui.errorCard]) {
       card.classList.add("hidden");
@@ -171,7 +196,9 @@
       button.classList.toggle("selected", selected);
       button.setAttribute("aria-pressed", String(selected));
     });
-    ui.sheetEyebrow.textContent = state.availability === "open" ? "OTWARTE NAJBLIŻEJ" : "PIĘĆ NAJBLIŻSZYCH";
+    ui.sheetEyebrow.textContent = state.availability === "open"
+      ? (state.mode === "other" ? "OTWARTE I NIEPOTWIERDZONE" : "OTWARTE NAJBLIŻEJ")
+      : "PIĘĆ NAJBLIŻSZYCH";
   }
 
   function setAvailability(availability) {
@@ -204,6 +231,7 @@
     state.searching = false;
     try { localStorage.setItem("zabhop-store-mode", mode); } catch (_) { /* Optional preference. */ }
     renderModeCopy();
+    renderAvailability();
 
     if (state.started && state.position) void findStores(true);
   }
@@ -243,6 +271,17 @@
     return [(meters / 1000).toFixed(meters < 10000 ? 1 : 0).replace(".", ","), "km"];
   }
 
+  function formatWalkingEta(distance, compact = false) {
+    const minutes = estimateWalkingMinutes(distance);
+    if (minutes == null) return "";
+    if (minutes === 0) return compact ? "na miejscu" : "Jesteś na miejscu";
+    if (minutes < 60) return compact ? `~${minutes} min` : `około ${minutes} min pieszo`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    const duration = remainder ? `${hours} godz. ${remainder} min` : `${hours} godz.`;
+    return compact ? `~${duration}` : `około ${duration} pieszo`;
+  }
+
   function buildAddress(properties) {
     const street = properties.street || properties.locality || properties.district || "";
     const number = properties.housenumber || "";
@@ -257,9 +296,25 @@
       ? (zabkas.length ? zabkas : stores)
       : stores.filter((store) => !normalizeText(store.name).includes("zabka"));
     const unique = [];
+    const buckets = new Map();
+    // Each cell is wider than 20 m throughout Poland, so checking neighboring
+    // cells keeps the original de-duplication behavior without quadratic scans.
+    const gridSize = 2500;
     for (const store of candidates) {
       if (!Number.isFinite(store.lat) || !Number.isFinite(store.lon)) continue;
-      if (unique.some((other) => distanceBetween(store, other) < 20)) continue;
+      const latitudeCell = Math.floor(store.lat * gridSize);
+      const longitudeCell = Math.floor(store.lon * gridSize);
+      let duplicate = false;
+      for (let latOffset = -1; latOffset <= 1 && !duplicate; latOffset += 1) {
+        for (let lonOffset = -1; lonOffset <= 1 && !duplicate; lonOffset += 1) {
+          const neighbors = buckets.get(`${latitudeCell + latOffset}:${longitudeCell + lonOffset}`);
+          if (neighbors?.some((other) => distanceBetween(store, other) < 20)) duplicate = true;
+        }
+      }
+      if (duplicate) continue;
+      const key = `${latitudeCell}:${longitudeCell}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(store);
       unique.push(store);
     }
     return rankStores(
@@ -268,7 +323,8 @@
         availability,
         date,
         limit: 5,
-        allowLikelyUnknown: mode === "zabka"
+        allowLikelyUnknown: mode === "zabka",
+        includeUnknown: mode === "other"
       }
     );
   }
@@ -322,7 +378,8 @@
 
   async function searchOfficial(position) {
     if (!officialStoreRows) {
-      officialStoreRows = await fetchJSON("./stores.json", 15000);
+      officialStoreRows = await catalogManager.load("zabka");
+      checkCatalogForUpdates("zabka");
     }
 
     const latitudeWindow = 0.24;
@@ -341,7 +398,8 @@
 
   async function searchOtherBundled(position) {
     if (!otherStoreRows) {
-      otherStoreRows = await fetchJSON("./other-stores.json", 15000);
+      otherStoreRows = await catalogManager.load("other");
+      checkCatalogForUpdates("other");
     }
 
     const latitudeWindow = 0.24;
@@ -360,9 +418,11 @@
   }
 
   async function searchOverpass(position, mode) {
+    const latitude = position.lat.toFixed(3);
+    const longitude = position.lon.toFixed(3);
     const query = mode === "zabka"
-      ? `[out:json][timeout:10];(nwr(around:12000,${position.lat},${position.lon})["name"~"Żabka|Zabka",i];nwr(around:12000,${position.lat},${position.lon})["brand"~"Żabka|Zabka",i];);out center tags 40;`
-      : `[out:json][timeout:10];nwr(around:12000,${position.lat},${position.lon})["shop"~"supermarket|convenience"]["name"];out center tags 80;`;
+      ? `[out:json][timeout:10];(nwr(around:12000,${latitude},${longitude})["name"~"Żabka|Zabka",i];nwr(around:12000,${latitude},${longitude})["brand"~"Żabka|Zabka",i];);out center tags 40;`
+      : `[out:json][timeout:10];nwr(around:12000,${latitude},${longitude})["shop"~"supermarket|convenience"]["name"];out center tags 80;`;
     const endpoints = [
       "https://overpass.kumi.systems/api/interpreter",
       "https://overpass-api.de/api/interpreter"
@@ -454,7 +514,9 @@
         const found = await search();
         combinedStores.push(...found);
         sorted = dedupeAndSort(combinedStores, position, mode, availability);
-        if (sorted.length) break;
+        // A valid local catalog is authoritative even when every nearby shop is
+        // currently closed; do not leak location to fallback search providers.
+        if (found.length) break;
       } catch (error) {
         networkError = error;
       }
@@ -502,14 +564,20 @@
     const [value, unit] = formatDistance(store.distance);
     ui.distance.textContent = value;
     ui.distanceUnit.textContent = unit;
+    ui.walkingEta.textContent = formatWalkingEta(store.distance);
+    ui.walkingEta.setAttribute("aria-label", `Szacowany czas dojścia: ${formatWalkingEta(store.distance)}`);
     ui.storeName.textContent = store.name || modeCopy[state.mode].defaultName;
     ui.storeAddress.textContent = store.address || "Adres dostępny w Mapach";
     ui.storeHours.textContent = store.openingStatus.label;
-    ui.storeHours.className = `store-hours ${store.openingStatus.state}`;
+    ui.storeHours.className = `store-hours ${store.openingStatus.state}${store.openingStatus.urgency ? ` ${store.openingStatus.urgency}-soon` : ""}`;
     ui.storeNumber.textContent = String(state.selectedIndex + 1).padStart(2, "0");
     ui.storesButton.textContent = storeCountLabel(state.stores.length);
     state.openOnlyEmpty = false;
     ui.retryButton.textContent = "Spróbuj ponownie";
+
+    ui.radarArtwork.forEach((image) => {
+      if (!image.getAttribute("src")) image.src = image.dataset.radarSrc;
+    });
 
     renderNeedle();
 
@@ -580,13 +648,19 @@
       address.textContent = store.address || "Adres dostępny w Mapach";
       const openingStatus = openingStatusFor(store);
       const hours = document.createElement("small");
-      hours.className = `opening-status ${openingStatus.state}`;
+      hours.className = `opening-status ${openingStatus.state}${openingStatus.urgency ? ` ${openingStatus.urgency}-soon` : ""}`;
       hours.textContent = openingStatus.label;
       copy.append(name, address, hours);
 
       const meters = document.createElement("span");
-      meters.className = "meters";
-      meters.textContent = `${value} ${unit}`;
+      meters.className = "store-metrics";
+      const metricDistance = document.createElement("span");
+      metricDistance.className = "meters";
+      metricDistance.textContent = `${value} ${unit}`;
+      const metricWalkingEta = document.createElement("small");
+      metricWalkingEta.className = "walking-estimate";
+      metricWalkingEta.textContent = formatWalkingEta(distance, true);
+      meters.append(metricDistance, metricWalkingEta);
 
       button.append(number, copy, meters);
       button.addEventListener("click", () => {
@@ -763,15 +837,19 @@
 
   function openSheet() {
     renderStoreList();
+    sheetReturnFocus = document.activeElement;
     ui.sheetBackdrop.classList.remove("hidden");
     ui.sheet.hidden = false;
     document.body.style.overflow = "hidden";
+    ui.closeSheet.focus();
   }
 
   function closeSheet() {
     ui.sheetBackdrop.classList.add("hidden");
     ui.sheet.hidden = true;
     document.body.style.overflow = "";
+    if (sheetReturnFocus?.focus) sheetReturnFocus.focus();
+    sheetReturnFocus = null;
   }
 
   ui.startButton.addEventListener("click", begin);
@@ -779,7 +857,10 @@
     if (state.openOnlyEmpty) setAvailability("all");
     else begin();
   });
-  ui.refreshButton.addEventListener("click", () => void findStores(true));
+  ui.refreshButton.addEventListener("click", () => {
+    checkCatalogForUpdates(state.mode, true);
+    void findStores(true);
+  });
   ui.routeButton.addEventListener("click", openRoute);
   ui.storesButton.addEventListener("click", openSheet);
   ui.closeSheet.addEventListener("click", closeSheet);
@@ -799,6 +880,28 @@
     if (document.visibilityState === "visible" && state.started) {
       void requestWakeLock();
       refreshAvailabilityResults(false);
+      checkCatalogForUpdates(state.mode);
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (ui.sheet.hidden) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeSheet();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const focusable = [...ui.sheet.querySelectorAll("button:not([disabled])")];
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
     }
   });
 

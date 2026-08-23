@@ -1,2 +1,8 @@
 /qa-temp/
 /.wrangler/
+/.local/
+/_site/
+*.xcarchive/
+*.xcresult/
+DerivedData/
+xcuserdata/

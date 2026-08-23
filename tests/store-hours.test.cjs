@@ -4,6 +4,7 @@ const storesCatalog = require("../stores.json");
 const otherStoresCatalog = require("../other-stores.json");
 const {
   availabilityStatusAt,
+  estimateWalkingMinutes,
   isPolishPublicHoliday,
   normalizeOfficialHours,
   parseOsmOpeningHours,
@@ -157,20 +158,18 @@ test("open-now ranking filters before limiting and never treats unknown as open"
   assert.deepEqual(rankStores(stores, { availability: "all" }).map((store) => store.id), ["closed-0", "closed-1", "closed-2", "closed-3", "closed-4"]);
 });
 
-test("open-now Żabka ranking prefers a closer probably-open store at the Zator screenshot time", () => {
-  const unknownNear = storesCatalog.find((store) => store[0] === "ZE315");
-  const confirmedFar = storesCatalog.find((store) => store[0] === "Z3298");
-  assert.ok(unknownNear);
-  assert.ok(confirmedFar);
+test("open-now Żabka ranking prefers a closer probably-open store when a confirmed shop is much farther", () => {
+  const unknownNear = { id: "near-unknown", hours: null };
+  const confirmedFar = { id: "far-confirmed", hours: Array(7).fill("420-1260") };
   const stores = [
-    { id: unknownNear[0], distance: 590, hours: unknownNear[5] },
-    { id: confirmedFar[0], distance: 1200, hours: confirmedFar[5] }
+    { ...unknownNear, distance: 590 },
+    { ...confirmedFar, distance: 1200 }
   ];
   const date = new Date("2026-07-12T07:28:00Z");
 
   assert.deepEqual(
     rankStores(stores, { availability: "open", allowLikelyUnknown: true, date }).map((store) => store.id),
-    ["ZE315", "Z3298"]
+    ["near-unknown", "far-confirmed"]
   );
   assert.equal(
     rankStores(stores, { availability: "open", allowLikelyUnknown: true, date })[0].openingStatus.state,
@@ -192,27 +191,76 @@ test("open-now ranking prefers a similarly close confirmed store over an uncerta
   );
 });
 
-test("bundled Zator store keeps the remaining official Sunday sentinel unknown", () => {
+test("an ambiguous official Sunday sentinel stays unknown around midnight", () => {
   const screenshotMoment = new Date("2026-07-11T22:25:00Z"); // Sunday 00:25 in Zator.
-  const row = storesCatalog.find((store) => store[0] === "ZE315");
-  assert.ok(row, "missing fixture ZE315");
-  assert.equal(row[5][6], null);
-  assert.equal(statusAt(row[5], { date: screenshotMoment }).state, "unknown");
+  const hours = normalizeOfficialHours({
+    "mon-sat": "06:00:00 - 23:00:00",
+    sun: "00:00:00 - 00:00:00"
+  });
+  assert.equal(hours[6], null);
+  assert.equal(statusAt(hours, { date: screenshotMoment }).state, "unknown");
 });
 
-test("bundled catalog rejects stale or undated OSM all-day claims from the screenshot", () => {
-  const suspectIds = [
-    "osm-n-2696878132", // stale SPAR, now reported under another brand
-    "osm-w-889502145", // Auchan Easy without a check date
-    "osm-n-12805812035",
-    "osm-n-3368741951",
-    "osm-n-2000515371"
-  ];
-  for (const id of suspectIds) {
-    const store = otherStoresCatalog.find((candidate) => candidate.id === id);
-    assert.ok(store, `missing fixture ${id}`);
-    assert.equal(Object.hasOwn(store, "hours"), false, `${id} must remain unconfirmed`);
+test("bundled catalogs stay structurally valid as store IDs change over time", () => {
+  assert.ok(storesCatalog.length >= 10000);
+  assert.ok(otherStoresCatalog.length >= 10000);
+  for (const row of storesCatalog.slice(0, 40)) {
+    assert.equal(typeof row[0], "string");
+    assert.ok(Number.isFinite(row[1]) && Number.isFinite(row[2]));
+    assert.ok(row[5] == null || (Array.isArray(row[5]) && row[5].length === 7));
   }
-  const recentlyChecked = otherStoresCatalog.find((store) => store.id === "osm-n-5254419323");
-  assert.deepEqual(recentlyChecked.hours, Array(7).fill("0-1440"));
+  for (const store of otherStoresCatalog.slice(0, 40)) {
+    assert.equal(typeof store.id, "string");
+    assert.ok(Number.isFinite(store.lat) && Number.isFinite(store.lon));
+    assert.ok(store.hours == null || (Array.isArray(store.hours) && store.hours.length === 7));
+  }
+});
+
+test("other-store ranking keeps unconfirmed shops visible without claiming they are open", () => {
+  const date = new Date("2026-08-23T10:00:00Z");
+  const stores = [
+    { id: "unconfirmed-next-door", distance: 45, hours: null },
+    { id: "confirmed-close", distance: 230, hours: Array(7).fill("0-1440") },
+    { id: "closed", distance: 30, hours: Array(7).fill("") }
+  ];
+  const ranked = rankStores(stores, { availability: "open", includeUnknown: true, date });
+  assert.deepEqual(ranked.map((store) => store.id), ["confirmed-close", "unconfirmed-next-door"]);
+  assert.equal(ranked[1].openingStatus.label, "Godziny niepotwierdzone");
+  assert.equal(ranked[1].openingStatus.state, "unknown");
+});
+
+test("shows precise closing-soon and opening-soon information", () => {
+  const hours = Array(7).fill("480-1200");
+  const closing = statusAt(hours, { date: new Date("2026-08-24T17:48:00Z") }); // 19:48 Warsaw.
+  assert.equal(closing.label, "Zamyka się za 12 min · 20:00");
+  assert.equal(closing.minutesUntilChange, 12);
+  assert.equal(closing.state, "open");
+
+  const opening = statusAt(hours, { date: new Date("2026-08-24T05:46:00Z") }); // 07:46 Warsaw.
+  assert.equal(opening.label, "Otwiera się za 14 min · 08:00");
+  assert.equal(opening.state, "closed");
+});
+
+test("does not announce midnight closure for a continuously overnight shop", () => {
+  const hours = parseOsmOpeningHours("Mo-Su 18:00-02:00").hours;
+  const status = statusAt(hours, { date: new Date("2026-08-24T21:49:00Z") }); // 23:49 Warsaw.
+  assert.equal(status.state, "open");
+  assert.equal(status.urgency, undefined);
+});
+
+test("estimates walking time locally and avoids a shop that closes before arrival", () => {
+  assert.equal(estimateWalkingMinutes(20), 0);
+  assert.equal(estimateWalkingMinutes(100), 2);
+  assert.ok(estimateWalkingMinutes(1000) >= 14);
+  assert.equal(estimateWalkingMinutes(Number.NaN), null);
+
+  const date = new Date("2026-08-24T17:48:00Z"); // 19:48 Warsaw.
+  const stores = [
+    { id: "closing-before-arrival", distance: 1100, hours: Array(7).fill("480-1200") },
+    { id: "stays-open", distance: 1350, hours: Array(7).fill("480-1380") }
+  ];
+  assert.deepEqual(
+    rankStores(stores, { availability: "open", date }).map((store) => store.id),
+    ["stays-open", "closing-before-arrival"]
+  );
 });

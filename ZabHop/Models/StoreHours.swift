@@ -21,10 +21,47 @@ enum StoreOpenState: String, Sendable {
     case unknown
 }
 
+struct StoreOpeningTransition: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case opening
+        case closing
+    }
+
+    let kind: Kind
+    let minutesRemaining: Int
+
+    var label: String {
+        switch kind {
+        case .opening: "Otwiera się za \(minutesRemaining) min"
+        case .closing: "Zamyka się za \(minutesRemaining) min"
+        }
+    }
+
+    var badge: String {
+        switch kind {
+        case .opening: "OTWIERA ZA \(minutesRemaining) MIN"
+        case .closing: "ZAMYKA ZA \(minutesRemaining) MIN"
+        }
+    }
+}
+
 struct StoreOpenStatus: Equatable, Sendable {
     let state: StoreOpenState
     let label: String
     let badge: String
+    let transition: StoreOpeningTransition?
+
+    init(
+        state: StoreOpenState,
+        label: String,
+        badge: String,
+        transition: StoreOpeningTransition? = nil
+    ) {
+        self.state = state
+        self.label = label
+        self.badge = badge
+        self.transition = transition
+    }
 
     static let unknown = StoreOpenStatus(
         state: .unknown,
@@ -46,6 +83,8 @@ enum StoreOpeningPolicy {
     static let probableZabkaStartMinute = 7 * 60
     static let probableZabkaEndMinute = 21 * 60
     static let probableZabkaDistancePenalty = 350.0
+    static let unknownOtherStoreDistancePenalty = 500.0
+    static let closingBeforeArrivalDistancePenalty = 1_400.0
 
     static func assessedStatus(
         confirmedStatus: StoreOpenStatus,
@@ -79,8 +118,13 @@ enum StoreOpeningPolicy {
         return .probablyOpen
     }
 
-    static func isOpenNowCandidate(_ status: StoreOpenStatus) -> Bool {
-        status.state == .open || status.state == .probablyOpen
+    static func isOpenNowCandidate(
+        _ status: StoreOpenStatus,
+        mode: StoreMode = .zabka
+    ) -> Bool {
+        status.state == .open
+            || status.state == .probablyOpen
+            || (mode == .other && status.state == .unknown)
     }
 
     static func rankingScore(
@@ -88,14 +132,38 @@ enum StoreOpeningPolicy {
         assessedStatus: StoreOpenStatus,
         availability: StoreAvailability
     ) -> Double {
-        guard availability == .openNow, assessedStatus.state == .probablyOpen else {
+        guard availability == .openNow else {
             return distance
         }
-        return distance + probableZabkaDistancePenalty
+
+        switch assessedStatus.state {
+        case .probablyOpen:
+            return distance + probableZabkaDistancePenalty
+        case .unknown:
+            return distance + unknownOtherStoreDistancePenalty
+        case .open:
+            guard let transition = assessedStatus.transition,
+                  transition.kind == .closing,
+                  distance >= 35 else {
+                return distance
+            }
+
+            let estimatedWalkingMinutes = Int(
+                (GeoMath.estimatedWalkingDuration(for: distance) / 60).rounded(.up)
+            )
+            return transition.minutesRemaining <= estimatedWalkingMinutes
+                ? distance + closingBeforeArrivalDistancePenalty
+                : distance
+        case .closed:
+            return distance
+        }
     }
 }
 
 struct StoreHours: Hashable, Sendable {
+    static let closingSoonThresholdMinutes = 45
+    static let openingSoonThresholdMinutes = 60
+
     struct EvaluationMoment: Sendable {
         let dayIndex: Int
         let currentMinute: Double
@@ -138,20 +206,69 @@ struct StoreHours: Hashable, Sendable {
         if let current = intervals.first(where: {
             moment.currentMinute >= Double($0.start) && moment.currentMinute < Double($0.end)
         }) {
+            let minutesRemaining = minutesUntilClosing(current: current, at: moment)
+            let transition: StoreOpeningTransition? = if minutesRemaining <= Self.closingSoonThresholdMinutes {
+                StoreOpeningTransition(kind: .closing, minutesRemaining: minutesRemaining)
+            } else {
+                nil
+            }
+
             return StoreOpenStatus(
                 state: .open,
-                label: current.start == 0 && current.end == 1_440
-                    ? "Otwarte teraz"
-                    : "Otwarte do \(StoreHours.format(minutes: current.end))",
-                badge: "OTWARTE"
+                label: transition?.label
+                    ?? (current.start == 0 && current.end == 1_440
+                        ? "Otwarte teraz"
+                        : "Otwarte do \(StoreHours.format(minutes: current.end))"),
+                badge: transition?.badge ?? "OTWARTE",
+                transition: transition
             )
+        }
+
+        let openingTransition: StoreOpeningTransition? = minutesUntilOpening(intervals: intervals, at: moment).flatMap { minutes in
+            guard minutes <= Self.openingSoonThresholdMinutes else { return nil }
+            return StoreOpeningTransition(kind: .opening, minutesRemaining: minutes)
         }
 
         return StoreOpenStatus(
             state: .closed,
-            label: "Zamknięte teraz",
-            badge: "ZAMKNIĘTE"
+            label: openingTransition?.label ?? "Zamknięte teraz",
+            badge: openingTransition?.badge ?? "ZAMKNIĘTE",
+            transition: openingTransition
         )
+    }
+
+    private func minutesUntilClosing(current: Interval, at moment: EvaluationMoment) -> Int {
+        var remaining = Double(current.end) - moment.currentMinute
+        var dayIndex = moment.dayIndex
+        var end = current.end
+
+        for _ in 0..<7 where end == 1_440 {
+            dayIndex = (dayIndex + 1) % 7
+            guard let encoded = days[dayIndex],
+                  let continuation = Self.decodeIntervals(encoded)?.first,
+                  continuation.start == 0 else {
+                break
+            }
+            remaining += Double(continuation.end)
+            end = continuation.end
+        }
+
+        return max(1, Int(remaining.rounded(.up)))
+    }
+
+    private func minutesUntilOpening(intervals: [Interval], at moment: EvaluationMoment) -> Int? {
+        if let next = intervals.first(where: { Double($0.start) > moment.currentMinute }) {
+            return max(1, Int((Double(next.start) - moment.currentMinute).rounded(.up)))
+        }
+
+        let nextDayIndex = (moment.dayIndex + 1) % 7
+        guard let encoded = days[nextDayIndex],
+              let first = Self.decodeIntervals(encoded)?.first else {
+            return nil
+        }
+
+        let remaining = Double(1_440 + first.start) - moment.currentMinute
+        return max(1, Int(remaining.rounded(.up)))
     }
 
     static func evaluationMoment(at date: Date) -> EvaluationMoment? {

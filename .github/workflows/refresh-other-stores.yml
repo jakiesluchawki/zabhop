@@ -1,9 +1,8 @@
-name: Refresh Żabka catalog
+name: Refresh other store catalog
 
 on:
   schedule:
-    - cron: "17 3 * * *"
-    - cron: "47 5 * * *"
+    - cron: "43 2 * * 3"
   workflow_dispatch:
 
 permissions:
@@ -16,7 +15,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 45
     steps:
       - name: Check out the canonical ŻabHop repository
         uses: actions/checkout@v4
@@ -24,18 +23,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build and validate catalog
-        run: node Tools/RefreshZabkaCatalog.mjs
+      - name: Fetch and validate current OpenStreetMap stores
+        run: node Tools/RefreshOtherStores.mjs
       - name: Verify the public manifest and bundled iOS catalog
-        run: node Tools/ValidateCatalogs.mjs --zabka
+        run: node Tools/ValidateCatalogs.mjs --other
       - name: Commit changed catalog
         run: |
-          if git diff --quiet -- stores.json stores-manifest.json ZabHop/Resources/stores.json; then
+          if git diff --quiet -- other-stores.json other-stores-manifest.json ZabHop/Resources/other-stores.json; then
             echo "Catalog unchanged"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stores.json stores-manifest.json ZabHop/Resources/stores.json
-          git commit -m "chore: refresh Żabka store catalog"
+          git add other-stores.json other-stores-manifest.json ZabHop/Resources/other-stores.json
+          git commit -m "chore: refresh other store catalog"
           git push

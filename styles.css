@@ -101,7 +101,7 @@ body::before {
   position: fixed;
   z-index: 0;
   inset: 0;
-  background-image: url("./felt-background.png?v=10");
+  background-image: url("./felt-background-optimized.jpg");
   background-position: top center;
   background-size: min(100vw, 460px) auto;
   background-repeat: repeat-y;
@@ -322,6 +322,7 @@ h2 { font-size: 32px; line-height: .95; }
 .distance-row { display: flex; justify-content: center; align-items: baseline; gap: 7px; }
 .distance-row strong { font-size: clamp(50px, 15vw, 62px); line-height: .84; letter-spacing: -.055em; font-variant-numeric: tabular-nums; }
 .distance-row small { font-size: 18px; font-weight: 700; }
+.walking-eta { min-height: 15px; margin: 5px 0 0; color: var(--olive); text-align: center; font-size: 12px; font-weight: 700; }
 .direction-hint { margin: 4px 0 10px; color: var(--violet); text-align: center; font-size: 11px; font-weight: 700; letter-spacing: .12em; }
 
 .store-card {
@@ -339,6 +340,8 @@ h2 { font-size: 32px; line-height: .95; }
 .store-copy p { margin: 3px 0 0; font-size: 12px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .store-copy .store-hours { margin-top: 4px; color: var(--violet); font-size: 10px; font-weight: 700; }
 .store-hours.closed, .opening-status.closed { color: var(--coral); }
+.store-hours.closing-soon, .opening-status.closing-soon { color: var(--coral); }
+.store-hours.opening-soon, .opening-status.opening-soon { color: var(--violet); }
 .store-hours.likely, .opening-status.likely { color: var(--olive); }
 .store-hours.unknown, .opening-status.unknown { color: rgba(109, 100, 53, .68); }
 .button-row { display: grid; grid-template-columns: .9fr 1.1fr; gap: 10px; margin-top: 10px; }
@@ -392,7 +395,10 @@ footer p a { color: inherit; text-underline-offset: 3px; }
 .store-item small { display: block; margin-top: 4px; font-size: 11px; line-height: 1.25; opacity: .75; }
 .store-item .opening-status { margin-top: 5px; font-weight: 700; opacity: 1; }
 .store-item .opening-status.open { color: #3f7f51; }
+.store-item .opening-status.closing-soon { color: var(--coral); }
+.store-item .store-metrics { display: grid; justify-items: end; gap: 4px; }
 .store-item .meters { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.store-item .walking-estimate { margin: 0; font-size: 10px; font-weight: 700; white-space: nowrap; opacity: .72; }
 
 .toast {
   position: fixed;
@@ -452,6 +458,7 @@ footer p a { color: inherit; text-underline-offset: 3px; }
   .lead { font-size: 14px; }
   .compass-stage { width: 232px; margin-top: 2px; }
   .distance-row strong { font-size: 50px; }
+  .walking-eta { margin-top: 3px; font-size: 11px; }
   .direction-hint { margin-bottom: 7px; }
   .store-card { padding: 7px 0; }
   .button-row { margin-top: 7px; }

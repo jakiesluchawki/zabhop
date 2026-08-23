@@ -9,6 +9,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var locationService = LocationService()
     @StateObject private var storeSearch = StoreSearchService()
+    @StateObject private var walkingRoute = WalkingRouteService()
 
     @AppStorage("zabhop.hasStarted") private var hasStarted = false
     @AppStorage("zabhop.storeMode") private var storeMode: StoreMode = .zabka
@@ -90,6 +91,7 @@ struct ContentView: View {
         .task {
             if hasStarted {
                 locationService.start()
+                await refreshCatalogs()
             }
         }
         .onReceive(locationService.$location.compactMap { $0 }) { location in
@@ -102,8 +104,7 @@ struct ContentView: View {
                     availability: availability,
                     at: now
                 )
-                if storeMode == .zabka,
-                   await storeSearch.refreshCatalogIfNeeded() {
+                if await storeSearch.refreshCatalogIfNeeded(mode: storeMode) {
                     await storeSearch.search(
                         near: location,
                         mode: storeMode,
@@ -114,6 +115,9 @@ struct ContentView: View {
                 }
                 if selectedStoreID == nil {
                     selectedStoreID = storeSearch.stores.first?.id
+                }
+                if let selectedStore {
+                    walkingRoute.update(for: selectedStore, from: location)
                 }
                 checkArrival(at: location)
             }
@@ -129,10 +133,16 @@ struct ContentView: View {
                     force: true,
                     at: date
                 )
+                if let selectedStore {
+                    walkingRoute.update(for: selectedStore, from: location, now: date)
+                }
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active else {
+                walkingRoute.cancel()
+                return
+            }
             let now = Date()
             evaluationDate = now
             guard hasStarted, let location = locationService.location else { return }
@@ -144,6 +154,10 @@ struct ContentView: View {
                     force: true,
                     at: now
                 )
+                if let selectedStore {
+                    walkingRoute.update(for: selectedStore, from: location, force: true, now: now)
+                }
+                await refreshCatalogs()
             }
         }
         .onChange(of: storeSearch.stores) { _, stores in
@@ -151,6 +165,10 @@ struct ContentView: View {
                 return
             }
             self.selectedStoreID = stores.first?.id
+        }
+        .onChange(of: selectedStoreID) { _, _ in
+            guard let selectedStore, let location = locationService.location else { return }
+            walkingRoute.update(for: selectedStore, from: location, force: true)
         }
         .sheet(isPresented: $showingStores) {
             if let location = locationService.location {
@@ -160,6 +178,7 @@ struct ContentView: View {
                     mode: storeMode,
                     availability: availability,
                     evaluationDate: evaluationDate,
+                    selectedWalkingEstimate: walkingRoute.estimate,
                     selectedStoreID: $selectedStoreID
                 )
                 .environment(\.hopPalette, palette)
@@ -434,8 +453,22 @@ struct ContentView: View {
 
                     Text(openingStatus.label)
                         .font(HopTheme.uiBold(11, relativeTo: .caption2))
-                        .foregroundStyle(statusColor(openingStatus.state))
+                        .foregroundStyle(statusColor(openingStatus))
                         .lineLimit(1)
+
+                    if distance >= 35, let walkingEstimate = walkingRoute.estimate {
+                        HStack(spacing: 4) {
+                            Image(systemName: "figure.walk")
+                            Text("\(walkingEstimate.formattedDuration) pieszo")
+                            if walkingEstimate.isRouteBased {
+                                Text("· trasa Apple Maps")
+                            }
+                        }
+                        .font(HopTheme.uiBold(10, relativeTo: .caption2))
+                        .foregroundStyle(palette.olive)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
+                    }
                 }
 
                 Spacer(minLength: 0)
@@ -661,9 +694,39 @@ struct ContentView: View {
                 force: true,
                 at: now
             )
+            await refreshCatalogs(force: true)
+            if let selectedStore {
+                walkingRoute.update(for: selectedStore, from: location, force: true, now: now)
+            }
         } else {
             locationService.refreshLocation()
         }
+    }
+
+    private func refreshCatalogs(force: Bool = false) async {
+        let preferredMode = storeMode
+        let activeCatalogUpdated = await storeSearch.refreshCatalogIfNeeded(
+            mode: preferredMode,
+            force: force
+        )
+        let secondaryMode: StoreMode = preferredMode == .zabka ? .other : .zabka
+        _ = await storeSearch.refreshCatalogIfNeeded(mode: secondaryMode, force: force)
+
+        guard activeCatalogUpdated,
+              storeMode == preferredMode,
+              let location = locationService.location else {
+            return
+        }
+
+        let now = Date()
+        evaluationDate = now
+        await storeSearch.search(
+            near: location,
+            mode: preferredMode,
+            availability: availability,
+            force: true,
+            at: now
+        )
     }
 
     private func showStoreSearchInMaps() {
@@ -689,6 +752,15 @@ struct ContentView: View {
                 force: true,
                 at: now
             )
+            if await storeSearch.refreshCatalogIfNeeded(mode: mode) {
+                await storeSearch.search(
+                    near: location,
+                    mode: mode,
+                    availability: availability,
+                    force: true,
+                    at: Date()
+                )
+            }
         }
     }
 
@@ -721,8 +793,9 @@ struct ContentView: View {
         }
     }
 
-    private func statusColor(_ state: StoreOpenState) -> Color {
-        return switch state {
+    private func statusColor(_ status: StoreOpenStatus) -> Color {
+        if status.transition?.kind == .closing { return palette.violet }
+        return switch status.state {
         case .open: palette.oliveDark
         case .probablyOpen: palette.olive
         case .closed: palette.violet

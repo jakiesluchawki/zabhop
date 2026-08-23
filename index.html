@@ -2,7 +2,7 @@
 <html lang="pl" data-theme="rose">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#ffe1eb">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -10,20 +10,20 @@
   <meta name="description" content="Filcowy radar prowadzący do najbliższej Żabki.">
   <meta property="og:title" content="ŻabHop — najbliższa Żabka">
   <meta property="og:description" content="Odpal radar i idź za wielką strzałką.">
-  <meta property="og:image" content="https://jakiesluchawki.github.io/zabhop/felt-frog.png?v=4">
+  <meta property="og:image" content="https://jakiesluchawki.github.io/zabhop/felt-frog-optimized.jpg">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://jakiesluchawki.github.io/zabhop/">
   <title>ŻabHop — sklep radar</title>
-  <link rel="manifest" href="./manifest.webmanifest?v=4">
-  <link rel="apple-touch-icon" href="./icon.png?v=4">
-  <link rel="icon" href="./icon.png?v=4">
-  <link rel="stylesheet" href="./styles.css?v=12">
+  <link rel="manifest" href="./manifest.webmanifest?v=5">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+  <link rel="icon" href="./icon-192.png" sizes="192x192">
+  <link rel="stylesheet" href="./styles.css?v=13">
 </head>
 <body>
   <main class="app-shell">
     <header class="topbar">
       <div class="brand-lockup">
-        <img src="./felt-frog.png" alt="" class="brand-icon">
+        <img src="./felt-frog-optimized.jpg" alt="" class="brand-icon" decoding="async">
         <div>
           <p class="brand-name">ŻabHop</p>
           <p class="brand-subtitle">terenowy sklep radar</p>
@@ -31,7 +31,7 @@
       </div>
       <div class="topbar-actions">
         <button id="themeButton" class="theme-button" type="button" aria-label="Motyw: Różana Łąka. Zmień na Szałwiowy Las">RÓŻ</button>
-        <div id="statusPill" class="status-pill"><span class="status-dot"></span><span class="status-copy">GOTOWY</span></div>
+        <div id="statusPill" class="status-pill" role="status"><span class="status-dot" aria-hidden="true"></span><span class="status-copy">GOTOWY</span></div>
       </div>
     </header>
 
@@ -49,7 +49,7 @@
 
     <section id="startCard" class="screen start-screen">
       <figure class="felt-hero">
-        <img src="./felt-frog.png" alt="Filcowa żaba ŻabHop">
+        <img src="./felt-frog-optimized.jpg" alt="Filcowa żaba ŻabHop" fetchpriority="high">
       </figure>
       <div class="intro-copy">
         <p id="startEyebrow" class="eyebrow">NAJBLIŻSZA ŻABKA</p>
@@ -61,7 +61,7 @@
     </section>
 
     <section id="loadingCard" class="screen state-screen hidden" aria-live="polite">
-      <img src="./felt-frog.png" alt="" class="state-frog">
+      <img src="./felt-frog-optimized.jpg" alt="" class="state-frog" decoding="async">
       <p class="eyebrow">WĘSZĘ PO OKOLICY</p>
       <h2 id="loadingTitle">Łapię Twój trop…</h2>
       <p id="loadingMessage" class="support-copy">Zezwól Safari na lokalizację i kompas.</p>
@@ -77,9 +77,9 @@
       </div>
 
       <div class="compass-stage" id="compass" aria-label="Kierunek do wybranej Żabki">
-        <img src="./felt-compass.png?v=10" alt="" class="compass-plate">
+        <img data-radar-src="./felt-compass-optimized.jpg" alt="" class="compass-plate" decoding="async">
         <div id="needle" class="needle" aria-hidden="true">
-          <img src="./felt-arrow.png?v=10" alt="">
+          <img data-radar-src="./felt-arrow-optimized.png" alt="" decoding="async">
         </div>
       </div>
 
@@ -87,6 +87,7 @@
         <strong id="distance">—</strong>
         <small id="distanceUnit"></small>
       </div>
+      <p id="walkingEta" class="walking-eta" aria-live="polite"></p>
       <p id="directionHint" class="direction-hint">IDŹ W TYM KIERUNKU</p>
 
       <div class="store-card">
@@ -105,7 +106,7 @@
     </section>
 
     <section id="errorCard" class="screen state-screen hidden" aria-live="assertive">
-      <img src="./felt-frog.png" alt="" class="state-frog error-frog">
+      <img src="./felt-frog-optimized.jpg" alt="" class="state-frog error-frog" decoding="async">
       <p class="eyebrow">ŻABA ZGUBIŁA TROP</p>
       <h2 id="errorTitle">Nie udało się znaleźć lokalizacji</h2>
       <p id="errorMessage" class="support-copy">Sprawdź uprawnienia Safari i spróbuj ponownie.</p>
@@ -135,9 +136,10 @@
   </section>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script src="./theme.js?v=12" defer></script>
-  <script src="./heading-filter.js?v=12" defer></script>
-  <script src="./store-hours.js?v=12" defer></script>
-  <script src="./app.js?v=12" defer></script>
+  <script src="./theme.js?v=13" defer></script>
+  <script src="./heading-filter.js?v=13" defer></script>
+  <script src="./store-hours.js?v=13" defer></script>
+  <script src="./catalog-sync.js?v=13" defer></script>
+  <script src="./app.js?v=13" defer></script>
 </body>
 </html>

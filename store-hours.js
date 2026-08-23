@@ -13,6 +13,12 @@
   const LIKELY_OPEN_START = 7 * 60;
   const LIKELY_OPEN_END = 21 * 60;
   const LIKELY_OPEN_DISTANCE_PENALTY = 350;
+  const UNKNOWN_HOURS_DISTANCE_PENALTY = 550;
+  const CLOSING_BEFORE_ARRIVAL_PENALTY = 1400;
+  const SOON_THRESHOLD_MINUTES = 30;
+  const WALKING_SPEED_METERS_PER_SECOND = 1.35;
+  const WALKING_DETOUR_FACTOR = 1.22;
+  const timeZoneFormatters = new Map();
 
   function parseClock(value) {
     const match = String(value).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
@@ -224,17 +230,22 @@
   }
 
   function zonedParts(date, timeZone) {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23"
-    }).formatToParts(date);
+    let formatter = timeZoneFormatters.get(timeZone);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat("en-CA", {
+        timeZone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        weekday: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hourCycle: "h23"
+      });
+      timeZoneFormatters.set(timeZone, formatter);
+    }
+    const parts = formatter.formatToParts(date);
     const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
     return {
       year: Number(values.year),
@@ -252,13 +263,41 @@
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   }
 
+  function estimateWalkingMinutes(distanceMeters) {
+    if (!Number.isFinite(distanceMeters) || distanceMeters < 0) return null;
+    if (distanceMeters < 35) return 0;
+    return Math.max(1, Math.ceil(distanceMeters * WALKING_DETOUR_FACTOR / WALKING_SPEED_METERS_PER_SECOND / 60));
+  }
+
+  function nextDayIsHoliday(parts) {
+    const nextDate = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + 1));
+    return isPolishPublicHoliday(nextDate.getUTCFullYear(), nextDate.getUTCMonth() + 1, nextDate.getUTCDate());
+  }
+
+  function nextOpeningTodayOrTomorrow(hours, parts, options = {}) {
+    const today = decodeIntervals(hours[parts.weekday]);
+    const upcomingToday = today?.find(([start]) => start > parts.minute);
+    if (upcomingToday) return { minute: upcomingToday[0], wait: upcomingToday[0] - parts.minute };
+
+    if (options.holidaysClosed && nextDayIsHoliday(parts)) return null;
+    const tomorrow = decodeIntervals(hours[(parts.weekday + 1) % 7]);
+    if (!tomorrow?.length) return null;
+    return { minute: tomorrow[0][0], wait: 1440 - parts.minute + tomorrow[0][0] };
+  }
+
+  function closesAtMidnightAndContinues(hours, parts, options = {}) {
+    if (options.holidaysClosed && nextDayIsHoliday(parts)) return false;
+    const tomorrow = decodeIntervals(hours[(parts.weekday + 1) % 7]);
+    return tomorrow?.[0]?.[0] === 0;
+  }
+
   function statusAt(hours, options = {}) {
     if (!Array.isArray(hours) || hours.length !== 7) {
       return { state: "unknown", label: "Godziny niepotwierdzone", badge: "NIEPOTWIERDZONE" };
     }
     const date = options.date instanceof Date ? options.date : new Date();
     const timeZone = options.timeZone || "Europe/Warsaw";
-    const parts = zonedParts(date, timeZone);
+    const parts = options.localTime || zonedParts(date, timeZone);
     if (options.holidaysClosed && isPolishPublicHoliday(parts.year, parts.month, parts.day)) {
       return { state: "closed", label: "Zamknięte — dzień świąteczny", badge: "ZAMKNIĘTE" };
     }
@@ -269,12 +308,36 @@
     if (!intervals) return { state: "unknown", label: "Godziny niepotwierdzone", badge: "NIEPOTWIERDZONE" };
     const current = intervals.find(([start, end]) => parts.minute >= start && parts.minute < end);
     if (current) {
+      const closesAtMidnight = current[1] === 1440;
+      const continuousOvernight = closesAtMidnight && closesAtMidnightAndContinues(hours, parts, options);
+      const minutesUntilChange = Math.max(1, Math.ceil(current[1] - parts.minute));
+      if (!continuousOvernight && minutesUntilChange <= SOON_THRESHOLD_MINUTES) {
+        return {
+          state: "open",
+          label: `Zamyka się za ${minutesUntilChange} min · ${formatMinutes(current[1])}`,
+          badge: "ZAMYKA SIĘ",
+          urgency: "closing",
+          minutesUntilChange
+        };
+      }
       return {
         state: "open",
         label: current[0] === 0 && current[1] === 1440
           ? "Otwarte teraz"
           : `Otwarte · do ${formatMinutes(current[1])}`,
         badge: "OTWARTE"
+      };
+    }
+
+    const nextOpening = nextOpeningTodayOrTomorrow(hours, parts, options);
+    const minutesUntilChange = nextOpening ? Math.max(1, Math.ceil(nextOpening.wait)) : null;
+    if (minutesUntilChange != null && minutesUntilChange <= SOON_THRESHOLD_MINUTES) {
+      return {
+        state: "closed",
+        label: `Otwiera się za ${minutesUntilChange} min · ${formatMinutes(nextOpening.minute)}`,
+        badge: "WKRÓTCE OTWARTE",
+        urgency: "opening",
+        minutesUntilChange
       };
     }
     return { state: "closed", label: "Zamknięte teraz", badge: "ZAMKNIĘTE" };
@@ -286,7 +349,7 @@
 
     const date = options.date instanceof Date ? options.date : new Date();
     const timeZone = options.timeZone || "Europe/Warsaw";
-    const { year, month, day, minute } = zonedParts(date, timeZone);
+    const { year, month, day, minute } = options.localTime || zonedParts(date, timeZone);
     if (isPolishPublicHoliday(year, month, day)) return status;
     if (minute < LIKELY_OPEN_START || minute >= LIKELY_OPEN_END) return status;
 
@@ -300,20 +363,37 @@
   function rankStores(stores, options = {}) {
     const availability = options.availability === "all" ? "all" : "open";
     const limit = Number.isFinite(options.limit) ? options.limit : 5;
+    const date = options.date instanceof Date ? options.date : new Date();
+    const timeZone = options.timeZone || "Europe/Warsaw";
+    const localTime = zonedParts(date, timeZone);
+    const includeUnknown = availability === "open" && options.includeUnknown === true;
     return stores
       .map((store) => ({
         ...store,
         openingStatus: availabilityStatusAt(store.hours, {
-          date: options.date,
-          timeZone: options.timeZone,
+          date,
+          timeZone,
+          localTime,
           holidaysClosed: store.holidaysClosed,
           allowLikelyUnknown: availability === "open" && options.allowLikelyUnknown === true
         })
       }))
-      .filter((store) => availability === "all" || ["open", "likely"].includes(store.openingStatus.state))
+      .filter((store) => availability === "all"
+        || ["open", "likely"].includes(store.openingStatus.state)
+        || (includeUnknown && store.openingStatus.state === "unknown"))
       .sort((a, b) => {
-        const aScore = a.distance + (a.openingStatus.state === "likely" ? LIKELY_OPEN_DISTANCE_PENALTY : 0);
-        const bScore = b.distance + (b.openingStatus.state === "likely" ? LIKELY_OPEN_DISTANCE_PENALTY : 0);
+        const score = (store) => {
+          let value = store.distance;
+          if (store.openingStatus.state === "likely") value += LIKELY_OPEN_DISTANCE_PENALTY;
+          if (store.openingStatus.state === "unknown") value += UNKNOWN_HOURS_DISTANCE_PENALTY;
+          if (store.openingStatus.urgency === "closing"
+            && store.openingStatus.minutesUntilChange <= estimateWalkingMinutes(store.distance)) {
+            value += CLOSING_BEFORE_ARRIVAL_PENALTY;
+          }
+          return value;
+        };
+        const aScore = score(a);
+        const bScore = score(b);
         return aScore - bScore || a.distance - b.distance;
       })
       .slice(0, limit);
@@ -322,6 +402,7 @@
   return {
     availabilityStatusAt,
     decodeIntervals,
+    estimateWalkingMinutes,
     isPolishPublicHoliday,
     normalizeOfficialHours,
     parseOsmOpeningHours,

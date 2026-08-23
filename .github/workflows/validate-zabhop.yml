@@ -1,0 +1,57 @@
+name: Validate ŻabHop
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "*.js"
+      - "*.html"
+      - "*.css"
+      - "*.json"
+      - "Tools/**"
+      - "ZabHop/**"
+      - "ZabHopTests/**"
+      - "ZabHop.xcodeproj/**"
+      - "tests/**"
+      - ".github/workflows/validate-zabhop.yml"
+      - ".github/workflows/refresh-zabka-catalog.yml"
+      - ".github/workflows/refresh-other-stores.yml"
+  pull_request:
+    paths:
+      - "*.js"
+      - "*.html"
+      - "*.css"
+      - "*.json"
+      - "Tools/**"
+      - "ZabHop/**"
+      - "ZabHopTests/**"
+      - "ZabHop.xcodeproj/**"
+      - "tests/**"
+      - ".github/workflows/validate-zabhop.yml"
+      - ".github/workflows/refresh-zabka-catalog.yml"
+      - ".github/workflows/refresh-other-stores.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-zabhop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web-and-catalogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out the canonical ŻabHop repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate both published and bundled catalogs
+        run: node Tools/ValidateCatalogs.mjs
+      - name: Test web behavior and catalog safeguards
+        run: node --test tests/*.test.cjs Tools/*.test.mjs

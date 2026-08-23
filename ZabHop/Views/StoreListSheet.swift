@@ -10,6 +10,7 @@ struct StoreListSheet: View {
     let mode: StoreMode
     let availability: StoreAvailability
     let evaluationDate: Date
+    let selectedWalkingEstimate: WalkingRouteService.Estimate?
     @Binding var selectedStoreID: Store.ID?
     @Environment(\.dismiss) private var dismiss
 
@@ -83,6 +84,12 @@ struct StoreListSheet: View {
             mode: mode,
             availability: availability
         )
+        let distance = store.distance(from: currentLocation)
+        let walkingDuration = if isSelected, let selectedWalkingEstimate {
+            selectedWalkingEstimate.duration
+        } else {
+            GeoMath.estimatedWalkingDuration(for: distance)
+        }
 
         return HStack(spacing: 14) {
             Text("\(index + 1)")
@@ -108,16 +115,23 @@ struct StoreListSheet: View {
 
                 Text(openingStatus.label)
                     .font(HopTheme.uiBold(10, relativeTo: .caption2))
-                    .foregroundStyle(statusColor(openingStatus.state, isSelected: isSelected))
+                    .foregroundStyle(statusColor(openingStatus, isSelected: isSelected))
                     .lineLimit(1)
             }
 
             Spacer(minLength: 8)
 
-            Text(GeoMath.formattedDistance(store.distance(from: currentLocation)))
-                .font(HopTheme.uiBold(13, relativeTo: .footnote))
-                .foregroundStyle(isSelected ? palette.violet : palette.olive)
-                .monospacedDigit()
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(GeoMath.formattedDistance(distance))
+                    .font(HopTheme.uiBold(13, relativeTo: .footnote))
+                    .foregroundStyle(isSelected ? palette.violet : palette.olive)
+                    .monospacedDigit()
+
+                Text(distance < 35 ? "na miejscu" : GeoMath.formattedWalkingDuration(walkingDuration))
+                    .font(HopTheme.ui(10, relativeTo: .caption2))
+                    .foregroundStyle(palette.mutedOlive)
+                    .monospacedDigit()
+            }
         }
         .frame(minHeight: 61)
         .contentShape(Rectangle())
@@ -126,9 +140,10 @@ struct StoreListSheet: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
-    private func statusColor(_ state: StoreOpenState, isSelected: Bool) -> Color {
+    private func statusColor(_ status: StoreOpenStatus, isSelected: Bool) -> Color {
         if isSelected { return palette.violet }
-        return switch state {
+        if status.transition?.kind == .closing { return palette.violet }
+        return switch status.state {
         case .open: palette.oliveDark
         case .probablyOpen: palette.olive
         case .closed: palette.violet

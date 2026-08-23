@@ -2,6 +2,9 @@ import CoreLocation
 import Foundation
 
 enum GeoMath {
+    static let averageWalkingSpeedMetersPerSecond = 1.35
+    static let estimatedWalkingDetourFactor = 1.2
+
     static func bearing(from source: CLLocationCoordinate2D, to destination: CLLocationCoordinate2D) -> CLLocationDirection {
         let sourceLatitude = source.latitude.degreesToRadians
         let sourceLongitude = source.longitude.degreesToRadians
@@ -48,6 +51,20 @@ enum GeoMath {
             return kilometers.formatted(.number.precision(.fractionLength(1))) + " km"
         }
         return kilometers.formatted(.number.precision(.fractionLength(0))) + " km"
+    }
+
+    static func estimatedWalkingDuration(for distance: CLLocationDistance) -> TimeInterval {
+        max(0, distance) * estimatedWalkingDetourFactor / averageWalkingSpeedMetersPerSecond
+    }
+
+    static func formattedWalkingDuration(_ duration: TimeInterval) -> String {
+        let totalMinutes = max(1, Int((max(0, duration) / 60).rounded(.up)))
+        guard totalMinutes >= 60 else { return "\(totalMinutes) min" }
+
+        let hours = totalMinutes / 60
+        let remainingMinutes = totalMinutes % 60
+        guard remainingMinutes > 0 else { return "\(hours) godz." }
+        return "\(hours) godz. \(remainingMinutes) min"
     }
 }
 
