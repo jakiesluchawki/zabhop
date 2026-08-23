@@ -51,6 +51,18 @@ Samodzielny proces TestFlight znajduje się w `Tools/ReleaseTestFlight.sh`. Nie 
 
 Dane dostępowe należy przekazać przez zmienne `ZABHOP_ASC_KEY_PATH`, `ZABHOP_ASC_KEY_ID` i `ZABHOP_ASC_ISSUER_ID` lub zapisać je w ignorowanym przez Git pliku `.local/app-store-connect.env`. Zmienna `ZABHOP_ASC_ENV_FILE` pozwala jednorazowo wskazać istniejący plik konfiguracyjny podczas migracji. Sekrety i archiwa nigdy nie trafiają do repozytorium.
 
+Domyślnie Xcode zarządza podpisem automatycznie. Jeżeli certyfikat dystrybucyjny znajduje się w oddzielnym pęku kluczy, można jawnie wybrać właściwą tożsamość i odpowiadający aplikacji profil App Store:
+
+```sh
+ZABHOP_SIGNING_KEYCHAIN_PATH='/ścieżka/do/pęku-kluczy.keychain-db' \
+ZABHOP_SIGNING_IDENTITY='odcisk-SHA1-certyfikatu-dystrybucyjnego' \
+ZABHOP_PROVISIONING_PROFILE_SPECIFIER='nazwa-profilu-App-Store-ŻabHop' \
+ZABHOP_SIGNING_KEYCHAIN_PASSWORD_FILE='/ścieżka/do/lokalnego-pliku-z-hasłem' \
+sh Tools/ReleaseTestFlight.sh
+```
+
+Plik hasła jest opcjonalny, jeśli pęk został już odblokowany. Przy jego podaniu skrypt odblokowuje wyłącznie wskazany istniejący pęk kluczy; nie wypisuje hasła, nie zapisuje go w repozytorium ani nie zmienia listy pęków czy uprawnień klucza. Podpis ręczny wykorzystuje tę samą tożsamość i profil podczas tworzenia archiwum oraz wysyłki do TestFlight.
+
 ```sh
 sh Tools/ReleaseTestFlight.sh
 sh Tools/CheckAppStoreConnect.sh --builds

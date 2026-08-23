@@ -43,9 +43,25 @@ fi
 KEY_PATH="${ZABHOP_ASC_KEY_PATH:-${DAILY_BRIEF_ASC_KEY_PATH:-}}"
 KEY_ID="${ZABHOP_ASC_KEY_ID:-${DAILY_BRIEF_ASC_KEY_ID:-}}"
 ISSUER_ID="${ZABHOP_ASC_ISSUER_ID:-${DAILY_BRIEF_ASC_ISSUER_ID:-}}"
+SIGNING_KEYCHAIN_PATH="${ZABHOP_SIGNING_KEYCHAIN_PATH:-}"
+SIGNING_KEYCHAIN_PASSWORD_FILE="${ZABHOP_SIGNING_KEYCHAIN_PASSWORD_FILE:-}"
+SIGNING_IDENTITY="${ZABHOP_SIGNING_IDENTITY:-}"
+SIGNING_PROFILE="${ZABHOP_PROVISIONING_PROFILE_SPECIFIER:-}"
 [ -n "$KEY_PATH" ] && [ -n "$KEY_ID" ] && [ -n "$ISSUER_ID" ] \
   || fail "set ZABHOP_ASC_KEY_PATH, ZABHOP_ASC_KEY_ID and ZABHOP_ASC_ISSUER_ID."
 [ -f "$KEY_PATH" ] || fail "App Store Connect API key file is unavailable."
+
+if [ -n "$SIGNING_KEYCHAIN_PATH$SIGNING_KEYCHAIN_PASSWORD_FILE$SIGNING_IDENTITY$SIGNING_PROFILE" ]; then
+  [ -n "$SIGNING_KEYCHAIN_PATH" ] && [ -n "$SIGNING_IDENTITY" ] && [ -n "$SIGNING_PROFILE" ] \
+    || fail "manual signing requires ZABHOP_SIGNING_KEYCHAIN_PATH, ZABHOP_SIGNING_IDENTITY and ZABHOP_PROVISIONING_PROFILE_SPECIFIER."
+  [ -f "$SIGNING_KEYCHAIN_PATH" ] || fail "configured signing keychain does not exist."
+  if [ -n "$SIGNING_KEYCHAIN_PASSWORD_FILE" ]; then
+    [ -f "$SIGNING_KEYCHAIN_PASSWORD_FILE" ] || fail "configured signing keychain password file does not exist."
+  fi
+  SIGNING_STYLE="manual"
+else
+  SIGNING_STYLE="automatic"
+fi
 
 mkdir -p "$WORK_DIR" "$DERIVED_DATA" "$TEST_DERIVED_DATA" "$EXPORT_DIR"
 
@@ -94,13 +110,48 @@ plutil -create xml1 "$EXPORT_OPTIONS"
 plutil -insert destination -string upload "$EXPORT_OPTIONS"
 plutil -insert manageAppVersionAndBuildNumber -bool NO "$EXPORT_OPTIONS"
 plutil -insert method -string app-store-connect "$EXPORT_OPTIONS"
-plutil -insert signingStyle -string automatic "$EXPORT_OPTIONS"
+plutil -insert signingStyle -string "$SIGNING_STYLE" "$EXPORT_OPTIONS"
 plutil -insert stripSwiftSymbols -bool YES "$EXPORT_OPTIONS"
 plutil -insert teamID -string "$EXPECTED_TEAM" "$EXPORT_OPTIONS"
 plutil -insert uploadSymbols -bool YES "$EXPORT_OPTIONS"
 
+if [ "$SIGNING_STYLE" = "manual" ]; then
+  plutil -insert signingCertificate -string "$SIGNING_IDENTITY" "$EXPORT_OPTIONS"
+  plutil -insert provisioningProfiles -dictionary "$EXPORT_OPTIONS"
+  /usr/libexec/PlistBuddy \
+    -c "Add :provisioningProfiles:$EXPECTED_BUNDLE_ID string $SIGNING_PROFILE" \
+    "$EXPORT_OPTIONS"
+
+  if [ -n "$SIGNING_KEYCHAIN_PASSWORD_FILE" ]; then
+    printf '%s\n' "Unlocking the configured distribution signing keychain…"
+    if ! node -e '
+      const fs = require("node:fs");
+      const { spawnSync } = require("node:child_process");
+      const [keychainPath, passwordPath] = process.argv.slice(1);
+      const password = fs.readFileSync(passwordPath, "utf8").trim();
+      if (!password) {
+        process.stderr.write("Signing keychain password file is empty.\n");
+        process.exit(1);
+      }
+      const result = spawnSync("/usr/bin/security", [
+        "unlock-keychain", "-p", password, keychainPath
+      ], {
+        stdio: ["ignore", "ignore", "pipe"],
+        encoding: "utf8"
+      });
+      if (result.error || result.status !== 0) {
+        process.stderr.write("Configured signing keychain could not be unlocked.\n");
+        if (result.stderr) process.stderr.write(result.stderr);
+        process.exit(1);
+      }
+    ' "$SIGNING_KEYCHAIN_PATH" "$SIGNING_KEYCHAIN_PASSWORD_FILE"; then
+      fail "distribution signing keychain could not be unlocked."
+    fi
+  fi
+fi
+
 printf 'Archiving ŻabHop build %s…\n' "$BUILD_NUMBER"
-if ! xcodebuild \
+set -- xcodebuild \
   -project "$IOS_PROJECT" \
   -scheme "$SCHEME" \
   -configuration Release \
@@ -111,8 +162,19 @@ if ! xcodebuild \
   -authenticationKeyPath "$KEY_PATH" \
   -authenticationKeyID "$KEY_ID" \
   -authenticationKeyIssuerID "$ISSUER_ID" \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-  archive >"$ARCHIVE_LOG" 2>&1; then
+  "CURRENT_PROJECT_VERSION=$BUILD_NUMBER"
+
+if [ "$SIGNING_STYLE" = "manual" ]; then
+  set -- "$@" \
+    CODE_SIGN_STYLE=Manual \
+    "CODE_SIGN_IDENTITY=$SIGNING_IDENTITY" \
+    "PROVISIONING_PROFILE_SPECIFIER=$SIGNING_PROFILE" \
+    "DEVELOPMENT_TEAM=$EXPECTED_TEAM" \
+    "OTHER_CODE_SIGN_FLAGS=--keychain \"$SIGNING_KEYCHAIN_PATH\""
+fi
+
+set -- "$@" archive
+if ! "$@" >"$ARCHIVE_LOG" 2>&1; then
   tail -n 120 "$ARCHIVE_LOG" >&2
   fail "signed archive did not succeed."
 fi
