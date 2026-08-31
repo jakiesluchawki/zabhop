@@ -675,6 +675,17 @@ struct ContentView: View {
 
             Link("Dane innych sklepów: © OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                 .underline()
+
+            HStack(spacing: 18) {
+                Link("Prywatność", destination: URL(string: "https://jakiesluchawki.github.io/zabhop/privacy.html")!)
+                    .underline()
+                    .frame(minHeight: 44)
+
+                Link("Pomoc", destination: URL(string: "https://jakiesluchawki.github.io/zabhop/support.html")!)
+                    .underline()
+                    .frame(minHeight: 44)
+            }
+            .foregroundStyle(palette.olive)
         }
         .font(HopTheme.ui(10, relativeTo: .caption2))
         .foregroundStyle(palette.olive.opacity(0.58))
