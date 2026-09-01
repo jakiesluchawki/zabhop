@@ -30,7 +30,7 @@ final class OnboardingUITests: XCTestCase {
             scroll.swipeUp()
         }
         XCTAssertTrue(isFullyVisible(footer, in: visibleFrame), "The bottom Help link must be reachable by scrolling.")
-        attachScreenshot(of: app, named: "Welcome footer is reachable")
+        attachScreenshot(named: "Welcome footer is reachable")
 
         let start = app.buttons["welcome.start"]
         for _ in 0..<4 {
@@ -44,7 +44,7 @@ final class OnboardingUITests: XCTestCase {
         // Denying location gives a deterministic post-welcome state without GPS or network access.
         XCTAssertTrue(app.staticTexts["Bez lokalizacji ani hop"].waitForExistence(timeout: 10))
         XCTAssertFalse(start.exists, "Starting must leave the welcome screen.")
-        attachScreenshot(of: app, named: "Welcome completed without location permission")
+        attachScreenshot(named: "Welcome completed without location permission")
     }
 
     private func isFullyVisible(_ element: XCUIElement, in frame: CGRect) -> Bool {
@@ -61,8 +61,8 @@ final class OnboardingUITests: XCTestCase {
         }
     }
 
-    private func attachScreenshot(of app: XCUIApplication, named name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+    private func attachScreenshot(named name: String) {
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
