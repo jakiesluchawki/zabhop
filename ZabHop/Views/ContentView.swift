@@ -37,52 +37,56 @@ struct ContentView: View {
         GeometryReader { proxy in
             let layout = ActiveScreenLayout(size: proxy.size)
 
-            ZStack {
-                palette.canvas.ignoresSafeArea()
-
+            ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    ForEach(0..<3, id: \.self) { index in
-                        Image("FeltBackground")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: proxy.size.width, height: proxy.size.width)
-                            .rotationEffect(.degrees(index.isMultiple(of: 2) ? 0 : 180))
-                            .colorMultiply(palette.feltMultiply)
-                            .overlay(palette.feltTint.opacity(0.08))
+                    brandHeader(layout: layout)
+
+                    Rectangle()
+                        .fill(palette.hairline)
+                        .frame(height: 1)
+                        .padding(.horizontal, layout.horizontalInset)
+
+                    storeModePicker(layout: layout)
+                    availabilityPicker(layout: layout)
+
+                    if hasStarted {
+                        activeContent(layout: layout)
+                    } else {
+                        landingContent(layout: layout)
                     }
+
+                    disclaimer(layout: layout)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .ignoresSafeArea()
-                .opacity(0.34)
-                .accessibilityHidden(true)
+                .padding(.bottom, hasStarted ? layout.bottomPadding : 16)
+            }
+            // The scroll viewport must match the window, including iPad's iPhone
+            // compatibility size. Decorative tiles must not enlarge its layout.
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .background(alignment: .top) {
+                ZStack(alignment: .top) {
+                    palette.canvas
 
-                ScrollView(showsIndicators: false) {
-                    LazyVStack(spacing: 0) {
-                        brandHeader(layout: layout)
-
-                        Rectangle()
-                            .fill(palette.hairline)
-                            .frame(height: 1)
-                            .padding(.horizontal, layout.horizontalInset)
-
-                        storeModePicker(layout: layout)
-                        availabilityPicker(layout: layout)
-
-                        if hasStarted {
-                            activeContent(layout: layout)
-                        } else {
-                            landingContent
+                    VStack(spacing: 0) {
+                        ForEach(0..<3, id: \.self) { index in
+                            Image("FeltBackground")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: proxy.size.width, height: proxy.size.width)
+                                .rotationEffect(.degrees(index.isMultiple(of: 2) ? 0 : 180))
+                                .colorMultiply(palette.feltMultiply)
+                                .overlay(palette.feltTint.opacity(0.08))
                         }
-
-                        disclaimer(layout: layout)
                     }
-                    .padding(.bottom, hasStarted ? layout.bottomPadding : 16)
+                    .opacity(0.34)
                 }
-                .scrollBounceBehavior(.basedOnSize)
-                .refreshable {
-                    guard hasStarted else { return }
-                    await refresh()
-                }
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .refreshable {
+                guard hasStarted else { return }
+                await refresh()
             }
         }
         .environment(\.hopPalette, palette)
@@ -294,13 +298,12 @@ struct ContentView: View {
         .accessibilityLabel("Kiedy chcesz zrobić zakupy")
     }
 
-    private var landingContent: some View {
+    private func landingContent(layout: ActiveScreenLayout) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Image("FeltFrog")
                 .resizable()
                 .scaledToFill()
-                .frame(maxWidth: .infinity)
-                .aspectRatio(1.13, contentMode: .fill)
+                .frame(width: layout.landingImageWidth, height: layout.landingImageWidth / 1.13)
                 .colorMultiply(palette.feltMultiply)
                 .overlay(palette.feltTint.opacity(0.09))
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -333,6 +336,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(HopPrimaryButtonStyle(palette: palette))
+            .accessibilityIdentifier("welcome.start")
             .padding(.top, 18)
 
             Button {
@@ -346,8 +350,9 @@ struct ContentView: View {
                     .padding(.vertical, 14)
             }
             .buttonStyle(.plain)
+            .accessibilityIdentifier("welcome.maps")
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, layout.horizontalInset)
     }
 
     @ViewBuilder
@@ -684,6 +689,7 @@ struct ContentView: View {
                 Link("Pomoc", destination: URL(string: "https://jakiesluchawki.github.io/zabhop/support.html")!)
                     .underline()
                     .frame(minHeight: 44)
+                    .accessibilityIdentifier("storeScreen.help")
             }
             .foregroundStyle(palette.olive)
         }
@@ -837,6 +843,7 @@ private struct ActiveScreenLayout {
 
     var isCompact: Bool { size.height < 790 || size.width < 380 }
     var horizontalInset: CGFloat { size.width < 375 ? 14 : 18 }
+    var landingImageWidth: CGFloat { max(0, size.width - horizontalInset * 2) }
     var headerIconSize: CGFloat { isCompact ? 38 : 42 }
     var headerVerticalPadding: CGFloat { isCompact ? 5 : 7 }
     var storeModeHeight: CGFloat { isCompact ? 30 : 33 }

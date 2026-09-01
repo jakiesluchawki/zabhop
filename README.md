@@ -47,7 +47,20 @@ xcodebuild -project ZabHop.xcodeproj -scheme ZabHop \
   -destination 'platform=iOS Simulator,name=iPhone 17' test
 ```
 
-Samodzielny proces TestFlight znajduje się w `Tools/ReleaseTestFlight.sh`. Nie korzysta ze skryptów innych projektów. Przed budową i wysłaniem zawsze wykonuje testy WWW, sprawdza oba katalogi oraz uruchamia pełne testy aplikacji iPhone.
+Przed wydaniem uruchom także osobny schemat `ZabHopUITests` na małym iPhonie i iPadzie. Test sprawdza, czy ekran startowy mieści się w oknie, można przewinąć go do linku Pomoc oraz nacisnąć przycisk startu i przejść dalej także bez zgody na lokalizację. Test iPada pozostawia aplikację w rzeczywistym trybie zgodności z iPhone'em — nie zmienia obsługiwanych rodzin urządzeń.
+
+```sh
+xcodebuild -project ZabHop.xcodeproj -scheme ZabHopUITests \
+  -destination 'platform=iOS Simulator,name=iPhone SE (3rd generation)' \
+  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
+xcodebuild -project ZabHop.xcodeproj -scheme ZabHopUITests \
+  -destination 'platform=iOS Simulator,name=iPad Air 11-inch (M3)' \
+  -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test
+```
+
+Nazwy muszą odpowiadać lokalnym symulatorom z `xcrun simctl list devices available`; można zamiast nazwy wskazać `id=UDID`.
+
+Samodzielny proces TestFlight znajduje się w `Tools/ReleaseTestFlight.sh`. Nie korzysta ze skryptów innych projektów. Przed budową i wysłaniem zawsze wykonuje testy WWW, sprawdza oba katalogi oraz uruchamia testy jednostkowe aplikacji iPhone. Testy interfejsu z osobnego schematu należy wykonać przed uruchomieniem tego procesu.
 
 Dane dostępowe należy przekazać przez zmienne `ZABHOP_ASC_KEY_PATH`, `ZABHOP_ASC_KEY_ID` i `ZABHOP_ASC_ISSUER_ID` lub zapisać je w ignorowanym przez Git pliku `.local/app-store-connect.env`. Zmienna `ZABHOP_ASC_ENV_FILE` pozwala jednorazowo wskazać istniejący plik konfiguracyjny podczas migracji. Sekrety i archiwa nigdy nie trafiają do repozytorium.
 

@@ -30,10 +30,18 @@
 		B00000000000000000000015 /* StoreHoursTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F00000000000000000000019 /* StoreHoursTests.swift */; };
 		B00000000000000000000016 /* StoreCatalogUpdateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001A /* StoreCatalogUpdateService.swift */; };
 		B00000000000000000000017 /* WalkingRouteService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001B /* WalkingRouteService.swift */; };
+		B00000000000000000000018 /* OnboardingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0000000000000000000001C /* OnboardingUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		D00000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = T00000000000000000000001;
+			remoteInfo = ZabHop;
+		};
+		D00000000000000000000003 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = A00000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -70,6 +78,8 @@
 		F00000000000000000000019 /* StoreHoursTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreHoursTests.swift; sourceTree = "<group>"; };
 		F0000000000000000000001A /* StoreCatalogUpdateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreCatalogUpdateService.swift; sourceTree = "<group>"; };
 		F0000000000000000000001B /* WalkingRouteService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalkingRouteService.swift; sourceTree = "<group>"; };
+		F0000000000000000000001C /* OnboardingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingUITests.swift; sourceTree = "<group>"; };
+		F0000000000000000000001D /* ZabHopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZabHopUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -87,6 +97,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		P00000000000000000000007 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -96,6 +113,7 @@
 				F00000000000000000000010 /* README.md */,
 				A12000000000000000000001 /* ZabHop */,
 				A12000000000000000000008 /* ZabHopTests */,
+				A1200000000000000000000A /* ZabHopUITests */,
 				A11000000000000000000001 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -105,6 +123,7 @@
 			children = (
 				F00000000000000000000011 /* ZabHop.app */,
 				F00000000000000000000012 /* ZabHopTests.xctest */,
+				F0000000000000000000001D /* ZabHopUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -203,6 +222,14 @@
 			path = Fonts;
 			sourceTree = "<group>";
 		};
+		A1200000000000000000000A /* ZabHopUITests */ = {
+			isa = PBXGroup;
+			children = (
+				F0000000000000000000001C /* OnboardingUITests.swift */,
+			);
+			path = ZabHopUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -245,6 +272,26 @@
 			productReference = F00000000000000000000012 /* ZabHopTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		T00000000000000000000003 /* ZabHopUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = L00000000000000000000004 /* Build configuration list for PBXNativeTarget "ZabHopUITests" */;
+			buildPhases = (
+				P00000000000000000000008 /* Sources */,
+				P00000000000000000000007 /* Frameworks */,
+				P00000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00000000000000000000004 /* PBXTargetDependency */,
+			);
+			name = ZabHopUITests;
+			packageProductDependencies = (
+			);
+			productName = ZabHopUITests;
+			productReference = F0000000000000000000001D /* ZabHopUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -259,6 +306,10 @@
 						CreatedOnToolsVersion = 26.6;
 					};
 					T00000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = T00000000000000000000001;
+					};
+					T00000000000000000000003 = {
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = T00000000000000000000001;
 					};
@@ -281,6 +332,7 @@
 			targets = (
 				T00000000000000000000001 /* ZabHop */,
 				T00000000000000000000002 /* ZabHopTests */,
+				T00000000000000000000003 /* ZabHopUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -301,6 +353,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		P00000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		P00000000000000000000009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -340,6 +399,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		P00000000000000000000008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B00000000000000000000018 /* OnboardingUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -347,6 +414,11 @@
 			isa = PBXTargetDependency;
 			target = T00000000000000000000001 /* ZabHop */;
 			targetProxy = D00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		D00000000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = T00000000000000000000001 /* ZabHop */;
+			targetProxy = D00000000000000000000003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -562,6 +634,46 @@
 			};
 			name = Release;
 		};
+		C00000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 78N6WG8P57;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pl.mieszkomahboob.zabhop.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ZabHop;
+			};
+			name = Debug;
+		};
+		C00000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 78N6WG8P57;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = pl.mieszkomahboob.zabhop.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ZabHop;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -588,6 +700,15 @@
 			buildConfigurations = (
 				C00000000000000000000005 /* Debug */,
 				C00000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		L00000000000000000000004 /* Build configuration list for PBXNativeTarget "ZabHopUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C00000000000000000000007 /* Debug */,
+				C00000000000000000000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
