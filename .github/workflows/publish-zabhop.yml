@@ -7,6 +7,7 @@ on:
     paths:
       - "assets/**"
       - "fonts/**"
+      - "premiera/**"
       - "*.html"
       - "*.js"
       - "*.css"
@@ -100,7 +101,9 @@ jobs:
             --exclude services \
             --exclude ZabHop \
             --exclude ZabHopTests \
+            --exclude ZabHopUITests \
             --exclude ZabHop.xcodeproj \
+            --exclude social \
             --exclude Tools \
             --exclude tests \
             --exclude qa \
@@ -114,7 +117,7 @@ jobs:
           test -f _site/app.js
           test -f _site/pogoda-energylandia/index.html
           test -f _site/planer-energylandia/index.html
-          for private_directory in .git .github .local apps services ZabHop ZabHopTests ZabHop.xcodeproj Tools tests qa; do
+          for private_directory in .git .github .local apps services ZabHop ZabHopTests ZabHopUITests ZabHop.xcodeproj social Tools tests qa; do
             test ! -e "_site/$private_directory" \
               || { echo "Unexpected private project content: $private_directory" >&2; exit 1; }
           done

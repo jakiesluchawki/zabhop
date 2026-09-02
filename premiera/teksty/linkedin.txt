@@ -1,0 +1,15 @@
+ŻabHop jest już w App Store.
+
+To niewielka aplikacja na iPhone’a z prostym zadaniem: wskazać kierunek do Żabki lub sklepu innej popularnej sieci w okolicy.
+
+Duża strzałka i odległość aktualizują się podczas ruchu. Można porównać do pięciu sklepów, sprawdzić dostępne godziny otwarcia i otworzyć trasę pieszą w Apple Maps.
+
+Katalogi są zapisane na urządzeniu i aktualizują się niezależnie od kolejnych wersji aplikacji. Lokalna baza, kierunek i dystans działają również bez internetu; aktualizacje i usługi Apple Maps potrzebują połączenia.
+
+Bezpłatnie. Bez konta, reklam i analityki.
+
+Jeśli sprawdzisz ŻabHopa podczas najbliższego spaceru, chętnie usłyszę, jak się sprawdził.
+
+https://apps.apple.com/pl/app/%C5%BCabhop/id6789961777
+
+Niezależny projekt, niepowiązany z prezentowanymi sieciami. Strzałka pokazuje kierunek w linii prostej, a godziny otwarcia mogą się zmieniać.
