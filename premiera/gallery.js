@@ -1,4 +1,5 @@
 const DEFAULT_STORE_URL = "https://apps.apple.com/pl/app/%C5%BCabhop/id6789961777";
+const REVISION = "20260903-static-v2";
 const BASE_URL = new URL("./", window.location.href);
 const notice = document.querySelector("#notice");
 const storeField = document.querySelector("#store-link");
@@ -30,12 +31,12 @@ function formatBytes(bytes) {
 function assetURL(path, kind) {
   const patterns = {
     image: /^images\/[a-zA-Z0-9._-]+\.(?:jpg|jpeg|png|webp)$/,
-    video: /^videos\/[a-zA-Z0-9._-]+\.mp4$/,
     package: /^[a-zA-Z0-9._-]+\.zip$/,
   };
   if (typeof path !== "string" || !patterns[kind]?.test(path)) throw new Error("Invalid asset path");
   const url = new URL(path, BASE_URL);
   if (url.origin !== BASE_URL.origin || !url.pathname.startsWith(BASE_URL.pathname)) throw new Error("Invalid asset origin");
+  if (kind === "package") url.searchParams.set("v", REVISION);
   return url.href;
 }
 
@@ -59,7 +60,13 @@ function normalizeManifest(raw) {
     const height = Number(artwork.height);
     if (width !== 1080 || height !== (artwork.format === "story" ? 1920 : 1350)) throw new Error("Unexpected artwork dimensions");
     const item = {
-      ...artwork,
+      id: artwork.id,
+      format: artwork.format,
+      title: artwork.title,
+      alt: artwork.alt,
+      file: artwork.file,
+      thumbnail: artwork.thumbnail,
+      bytes: artwork.bytes,
       width,
       height,
       url: assetURL(artwork.file, "image"),
@@ -67,15 +74,11 @@ function normalizeManifest(raw) {
       storeUrl: appStoreURL(artwork.storeUrl || storeUrl),
       stickerLabel: typeof artwork.stickerLabel === "string" ? artwork.stickerLabel : "Pobierz ŻabHopa",
     };
-    if (artwork.video) {
-      if (artwork.video.mime !== "video/mp4" || artwork.video.kind !== "montage" || artwork.video.fullCopyAlwaysVisible !== true) throw new Error("Unexpected video format");
-      item.video = { ...artwork.video, url: assetURL(artwork.video.file, "video") };
-    }
     return item;
   });
   if (!artworks.some((item) => item.format === "story") || !artworks.some((item) => item.format === "post")) throw new Error("Missing artwork group");
-  const packages = Object.fromEntries(["full", "stories", "jpg"].map((key) => {
-    const pack = raw.packages[key];
+  const packages = Object.fromEntries(["full", "stories"].map((key) => {
+    const pack = raw.packages[key] || (key === "stories" ? raw.packages.jpg : null);
     if (!pack) throw new Error("Missing package");
     return [key, { ...pack, url: assetURL(pack.file, "package") }];
   }));
@@ -139,9 +142,9 @@ function rememberShare(key, entry) {
 }
 
 function makeShareButton(artwork) {
-  const target = artwork.video || artwork;
-  const mime = artwork.video ? "video/mp4" : "image/jpeg";
-  const format = artwork.video ? "MP4" : "JPG";
+  const target = artwork;
+  const mime = "image/jpeg";
+  const format = "JPG";
   const name = target.file.split("/").pop();
   if (!supportsFileSharing(name, mime) || target.bytes > MAX_SHARE_BYTES) return null;
   const initialLabel = `Przygotuj zapis ${format}`;
@@ -164,7 +167,7 @@ function makeShareButton(artwork) {
     button.textContent = "Przygotowuję plik…";
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 90000);
-    announce(`Pobieram wybrany ${format}${formatBytes(target.bytes) ? ` (${formatBytes(target.bytes)})` : ""}. Pozostałe filmy nie są pobierane.`);
+    announce(`Pobieram wybrany ${format}${formatBytes(target.bytes) ? ` (${formatBytes(target.bytes)})` : ""}.`);
     try {
       // A full media file is fetched only after this explicit user request.
       const response = await fetch(target.url, { signal: controller.signal, credentials: "same-origin" });
@@ -213,59 +216,31 @@ function makeArtworkCard(artwork) {
   const card = element("article", "asset-card");
   const titleId = `title-${artwork.id}`;
   card.setAttribute("aria-labelledby", titleId);
-  if (artwork.video) {
-    const video = element("video");
-    video.controls = true;
-    video.playsInline = true;
-    video.preload = "none";
-    video.poster = artwork.previewURL;
-    video.width = artwork.width;
-    video.height = artwork.height;
-    video.setAttribute("aria-label", `${artwork.title}. Montaż bez dźwięku. ${artwork.alt}`);
-    const source = element("source");
-    source.src = artwork.video.url;
-    source.type = "video/mp4";
-    video.append(source, document.createTextNode("Użyj linku do MP4 poniżej, jeśli film nie jest obsługiwany."));
-    video.addEventListener("play", () => {
-      document.querySelectorAll(".gallery video").forEach((other) => { if (other !== video) other.pause(); });
-    });
-    card.append(video);
-  } else {
-    const link = element("a", "poster-link");
-    link.href = artwork.url;
-    link.target = "_blank";
-    link.rel = "noopener";
-    link.setAttribute("aria-label", `Otwórz pełny JPG: ${artwork.title}`);
-    const image = element("img");
-    image.src = artwork.previewURL;
-    image.alt = artwork.alt;
-    image.loading = "lazy";
-    image.decoding = "async";
-    image.width = artwork.width;
-    image.height = artwork.height;
-    link.append(image);
-    card.append(link);
-  }
+  const link = element("a", "poster-link");
+  link.href = artwork.url;
+  link.target = "_blank";
+  link.rel = "noopener";
+  link.setAttribute("aria-label", `Otwórz pełny JPG: ${artwork.title}`);
+  const image = element("img");
+  image.src = artwork.previewURL;
+  image.alt = artwork.alt;
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.width = artwork.width;
+  image.height = artwork.height;
+  link.append(image);
+  card.append(link);
 
   const body = element("div", "asset-body");
-  body.append(element("p", "asset-kicker", artwork.video ? "STORKA · MONTAŻ / BEZ DŹWIĘKU" : artwork.format === "story" ? "STORKA · JPG" : "POST · JPG"));
+  body.append(element("p", "asset-kicker", artwork.format === "story" ? "STORKA · JPG" : "POST · JPG"));
   const heading = element("h3", "", artwork.title);
   heading.id = titleId;
   body.append(heading);
   const actions = element("div", "asset-actions");
-  if (artwork.video) {
-    actions.append(linkButton("Pobierz MP4", artwork.video.url, { primary: true, download: true }));
-    actions.append(linkButton("Otwórz MP4", artwork.video.url, { newTab: true }));
-  }
-  actions.append(linkButton("Pobierz JPG", artwork.url, { primary: !artwork.video, download: true }));
+  actions.append(linkButton("Pobierz JPG", artwork.url, { primary: true, download: true }));
   actions.append(linkButton("Otwórz JPG", artwork.url, { newTab: true }));
   body.append(actions);
   const meta = [];
-  if (artwork.video) {
-    const duration = Number(artwork.video.duration);
-    if (Number.isFinite(duration) && duration > 0) meta.push(`${duration.toLocaleString("pl-PL", { maximumFractionDigits: 1 })} s`);
-    if (formatBytes(artwork.video.bytes)) meta.push(`MP4 ${formatBytes(artwork.video.bytes)}`);
-  }
   if (formatBytes(artwork.bytes)) meta.push(`JPG ${formatBytes(artwork.bytes)}`);
   if (meta.length) body.append(element("p", "asset-meta", meta.join(" · ")));
   const shareButton = makeShareButton(artwork);
@@ -325,7 +300,7 @@ async function loadManifest() {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(new URL("manifest.json", BASE_URL), { signal: controller.signal, credentials: "same-origin", cache: "no-cache" });
+    const response = await fetch(new URL(`manifest.json?v=${REVISION}`, BASE_URL), { signal: controller.signal, credentials: "same-origin", cache: "no-cache" });
     if (!response.ok) throw new Error("Manifest unavailable");
     const manifest = normalizeManifest(await response.json());
     renderManifest(manifest);

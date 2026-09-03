@@ -1,20 +1,19 @@
 ŻABHOP — PAKIET PREMIEROWY
 
-5 storek 1080 × 1920 (MP4 + alternatywne JPG), 2 posty 1080 × 1350 i gotowe teksty.
+5 statycznych storek JPG 1080 × 1920, 2 posty JPG 1080 × 1350 i gotowe teksty.
 
 LINK DO APLIKACJI
 https://apps.apple.com/pl/app/%C5%BCabhop/id6789961777
 
 JAK PUBLIKOWAĆ
-1. Wybierz storki 01–05 po kolei. Dla jednego numeru użyj MP4 albo JPG, nie obu.
-2. Dodaj prawdziwą naklejkę Link w Instagramie. Film i JPG nie zawierają klikalnych przycisków.
+1. Wybierz obrazy 01–05 po kolei albo opublikuj wybraną storkę.
+2. Dodaj prawdziwą naklejkę Link w Instagramie. Obraz JPG nie zawiera klikalnego przycisku.
 3. Miejsce naklejki: środek wolnego pola na ok. 82% wysokości (x=240,y=1510,w=600,h=120 przy 1080×1920), nad małym podpisem.
-4. Filmy są bez dźwięku; muzykę możesz dobrać w Instagramie.
-5. Na iPhonie pobierz ZIP do Plików, rozpakuj, otwórz wybrany plik i użyj Udostępnij → Zapisz obraz / Zapisz wideo.
-6. Link w opisie Instagrama nie jest klikalny. Użyj naklejki albo linku w profilu.
+4. Na iPhonie pobierz ZIP do Plików, rozpakuj, otwórz wybrany JPG i użyj Udostępnij → Zapisz obraz. Na Macu rozpakuj ZIP i wybierz gotowe obrazy.
+5. Link w opisie Instagrama nie jest klikalny. Użyj naklejki albo linku w profilu.
 
 AUTENTYCZNOŚĆ
-Wykorzystano oryginalne grafiki ŻabHopa oraz niezmienione zrzuty ekranów iOS użyte w App Store. Filmy są montażami z kadrowaniem i zbliżeniami, a nie nagraniami dotknięć lub spaceru. Wartości odległości, adresy, godziny i ETA to przykładowy stan z chwili wykonania zrzutów; nie są informacją na żywo. Nie zmieniano interfejsu ani danych na screenshotach.
+Wykorzystano oryginalne grafiki ŻabHopa oraz niezmienione zrzuty ekranów iOS użyte w App Store. Wartości odległości, adresy, godziny i ETA to przykładowy stan z chwili wykonania zrzutów; nie są informacją na żywo. Nie zmieniano interfejsu ani danych na screenshotach.
 
 OGRANICZENIA
 ŻabHop to niezależna, nieoficjalna aplikacja, bez powiązania z prezentowanymi sieciami. Strzałka wskazuje kierunek w linii prostej; trasa piesza jest w Apple Maps. Godziny otwarcia i czas dojścia mogą się zmieniać. Lokalne katalogi, kierunek i dystans działają offline; aktualizacje i usługi Apple Maps potrzebują połączenia.

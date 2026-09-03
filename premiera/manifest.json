@@ -1,9 +1,10 @@
 {
   "title": "ŻabHop · pakiet premierowy",
-  "revision": "20260903-v1",
-  "generatedOn": "2026-09-02T20:29:41.075Z",
+  "revision": "20260903-static-v2",
+  "generatedOn": "2026-09-03T05:49:37.743Z",
   "storeUrl": "https://apps.apple.com/pl/app/%C5%BCabhop/id6789961777",
-  "disclosure": "Montaże oryginalnych grafik i rzeczywistych ekranów aplikacji, nie nagrania gestów. Dane na ekranach są historycznymi przykładami.",
+  "mediaType": "image",
+  "disclosure": "Statyczne plansze z oryginalnymi grafikami i rzeczywistymi ekranami aplikacji. Dane na ekranach są historycznymi przykładami.",
   "artworks": [
     {
       "id": "story-01-premiera",
@@ -25,20 +26,6 @@
         "y": 1510,
         "width": 600,
         "height": 120
-      },
-      "video": {
-        "file": "videos/story-01-premiera.mp4",
-        "mime": "video/mp4",
-        "codec": "H.264",
-        "kind": "montage",
-        "width": 1080,
-        "height": 1920,
-        "fps": 30,
-        "duration": 7,
-        "bytes": 3846168,
-        "sha256": "03c8371f8b56728a7f5246d9e37a9bde39008e0b41bbcec2cf69415e36d0de4b",
-        "audio": false,
-        "fullCopyAlwaysVisible": true
       }
     },
     {
@@ -61,20 +48,6 @@
         "y": 1510,
         "width": 600,
         "height": 120
-      },
-      "video": {
-        "file": "videos/story-02-kierunek.mp4",
-        "mime": "video/mp4",
-        "codec": "H.264",
-        "kind": "montage",
-        "width": 1080,
-        "height": 1920,
-        "fps": 30,
-        "duration": 7.199999999999999,
-        "bytes": 4168835,
-        "sha256": "4ba0031063495de72a8312b1619038579737cb91e2b65df3645a4ad06c3e7b33",
-        "audio": false,
-        "fullCopyAlwaysVisible": true
       }
     },
     {
@@ -97,20 +70,6 @@
         "y": 1510,
         "width": 600,
         "height": 120
-      },
-      "video": {
-        "file": "videos/story-03-otwarte.mp4",
-        "mime": "video/mp4",
-        "codec": "H.264",
-        "kind": "montage",
-        "width": 1080,
-        "height": 1920,
-        "fps": 30,
-        "duration": 7.199999999999999,
-        "bytes": 2593631,
-        "sha256": "3bb13933a4c991d08ea8a67ed491df7f95d261915d7f5c1b5f47bf18f591c017",
-        "audio": false,
-        "fullCopyAlwaysVisible": true
       }
     },
     {
@@ -133,20 +92,6 @@
         "y": 1510,
         "width": 600,
         "height": 120
-      },
-      "video": {
-        "file": "videos/story-04-inne-sklepy.mp4",
-        "mime": "video/mp4",
-        "codec": "H.264",
-        "kind": "montage",
-        "width": 1080,
-        "height": 1920,
-        "fps": 30,
-        "duration": 7,
-        "bytes": 3732781,
-        "sha256": "4da50361fc5840bda1ef4119b6ad69e62ba056510faeb471b4d631f8d21d3a54",
-        "audio": false,
-        "fullCopyAlwaysVisible": true
       }
     },
     {
@@ -169,20 +114,6 @@
         "y": 1510,
         "width": 600,
         "height": 120
-      },
-      "video": {
-        "file": "videos/story-05-pobierz.mp4",
-        "mime": "video/mp4",
-        "codec": "H.264",
-        "kind": "montage",
-        "width": 1080,
-        "height": 1920,
-        "fps": 30,
-        "duration": 7,
-        "bytes": 1583045,
-        "sha256": "8c592d1bf65bb489b31c43eb7faa2cc357a94be297f594182c6612fb6352ff02",
-        "audio": false,
-        "fullCopyAlwaysVisible": true
       }
     },
     {
@@ -239,7 +170,7 @@
       "id": "stories-linki",
       "title": "Stories — kolejność i naklejki Link",
       "platform": "stories",
-      "text": "Opublikuj materiały 01–05 w tej kolejności. Dla każdego numeru wybierz MP4 ALBO JPG — to alternatywne wersje tej samej storki.\n\n01 / Hop, po zakupy — „Pobierz ŻabHopa”\n02 / W tę stronę — „Znajdź swój kierunek”\n03 / A zdążę? — „Sprawdź sklepy w okolicy”\n04 / Nie tylko Żabka — „Wybierz swój sklep”\n05 / Po prostu hop — „Pobierz za darmo”\n\nKażda naklejka prowadzi pod ten sam adres:\nhttps://apps.apple.com/pl/app/%C5%BCabhop/id6789961777\n\nDodaj prawdziwą naklejkę Link w Instagramie. Na obrazie ani filmie nie ma klikalnego linku. Umieść ją na środku wolnego pola, około 82% wysokości, nad małym podpisem.\n\nFilmy są bez dźwięku. Muzykę możesz wybrać w Instagramie. To montaże oryginalnych grafik i autentycznych zrzutów ekranu, a nie nagrania gestów ani aktualne dane o sklepach."
+      "text": "Opublikuj statyczne obrazy JPG 01–05 w tej kolejności albo wybierz jedną storkę.\n\n01 / Hop, po zakupy — „Pobierz ŻabHopa”\n02 / W tę stronę — „Znajdź swój kierunek”\n03 / A zdążę? — „Sprawdź sklepy w okolicy”\n04 / Nie tylko Żabka — „Wybierz swój sklep”\n05 / Po prostu hop — „Pobierz za darmo”\n\nKażda naklejka prowadzi pod ten sam adres:\nhttps://apps.apple.com/pl/app/%C5%BCabhop/id6789961777\n\nDodaj prawdziwą naklejkę Link w Instagramie. Na obrazie nie ma klikalnego linku. Umieść ją na środku wolnego pola, około 82% wysokości, nad małym podpisem.\n\nPlansze korzystają z oryginalnych grafik i autentycznych zrzutów ekranu. Widoczne dane o sklepach są historycznymi przykładami."
     }
   ],
   "sources": [
@@ -263,31 +194,23 @@
   "packages": {
     "stories": {
       "file": "zabhop-stories.zip",
-      "bytes": 16784411,
-      "sha256": "df53a4d240ad2ed8e348a1cf439312a547969f0f67225124a622bd3ace05f5d6",
+      "bytes": 916301,
+      "sha256": "9f944d12c017415995d82d4f219d7f4d57fa2442f490bf5f58dc55bcea50bb86",
       "entries": [
         "images/story-01-premiera.jpg",
         "images/story-02-kierunek.jpg",
         "images/story-03-otwarte.jpg",
         "images/story-04-inne-sklepy.jpg",
         "images/story-05-pobierz.jpg",
-        "videos/story-01-premiera.mp4",
-        "videos/story-02-kierunek.mp4",
-        "videos/story-03-otwarte.mp4",
-        "videos/story-04-inne-sklepy.mp4",
-        "videos/story-05-pobierz.mp4",
         "CZYTAJ-MNIE.txt",
-        "teksty/instagram.txt",
-        "teksty/facebook.txt",
-        "teksty/linkedin.txt",
         "teksty/stories-linki.txt",
         "teksty/stories-pelny-tekst.txt"
       ]
     },
     "jpg": {
       "file": "zabhop-stories-jpg.zip",
-      "bytes": 916467,
-      "sha256": "c1202dd30a9161cd0a0c34aa9c3f5db0b84fe43c2f9fdf602d457810b1b6d8f8",
+      "bytes": 916301,
+      "sha256": "99468c4efde6346248aad8e76336bc0df13e4d2154943af219e8689fa1f4ead5",
       "entries": [
         "images/story-01-premiera.jpg",
         "images/story-02-kierunek.jpg",
@@ -301,8 +224,8 @@
     },
     "full": {
       "file": "zabhop-premiera.zip",
-      "bytes": 17097571,
-      "sha256": "c53f9e8a419ceb2b4dad3fd60aac09a9ff8fa06ae531fdbf3185bbcdddbe5f01",
+      "bytes": 1231386,
+      "sha256": "5cb933af7b74e03b782860bb488a7bd99ea763cd97db85da4da431c01b7ee31a",
       "entries": [
         "images/story-01-premiera.jpg",
         "images/story-02-kierunek.jpg",
@@ -311,11 +234,6 @@
         "images/story-05-pobierz.jpg",
         "images/post-01-premiera.jpg",
         "images/post-02-radar.jpg",
-        "videos/story-01-premiera.mp4",
-        "videos/story-02-kierunek.mp4",
-        "videos/story-03-otwarte.mp4",
-        "videos/story-04-inne-sklepy.mp4",
-        "videos/story-05-pobierz.mp4",
         "CZYTAJ-MNIE.txt",
         "teksty/instagram.txt",
         "teksty/facebook.txt",
