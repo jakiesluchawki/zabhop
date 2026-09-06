@@ -21,6 +21,8 @@ Workflow `Refresh Żabka catalog` pobiera oficjalny lokalizator każdego dnia, z
 
 Oba procesy aktualizują jednocześnie katalog publiczny, manifest oraz bazę dołączaną do aplikacji iPhone. Odrzucają podejrzanie małe wyniki, utratę znacznej części sklepów i nieprawidłowe sumy kontrolne. Import OSM pomija sklepy zamknięte, planowane i niedostępne; deklarację „24/7” uznaje tylko po udokumentowanej aktualnej weryfikacji. Niepotwierdzone godziny są wyraźnie oznaczane.
 
+Pobieranie Żabki ma limit 30 sekund na próbę i maksymalnie cztery próby (przerwy 5, 15 i 45 sekund). Ponawiane są także odpowiedzi HTTP 200 z niepełną bazą lub uszkodzonym JSON-em. Kolejne próby żądają świeżych danych pod adresem z unikalnym parametrem cache. Po wyczerpaniu prób proces zgłasza błąd i pozostawia ostatnią poprawną bazę; nie obniża progów bezpieczeństwa. Logi zawierają liczby rekordów, a nie pełne rekordy źródłowe.
+
 Ręczne sprawdzenie i odświeżenie:
 
 ```sh

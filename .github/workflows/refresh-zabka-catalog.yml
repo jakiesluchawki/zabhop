@@ -24,6 +24,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Verify catalog recovery safeguards
+        run: node --test Tools/zabka-catalog-source.test.mjs
       - name: Build and validate catalog
         run: node Tools/RefreshZabkaCatalog.mjs
       - name: Verify the public manifest and bundled iOS catalog
