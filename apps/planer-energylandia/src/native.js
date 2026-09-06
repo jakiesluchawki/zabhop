@@ -133,12 +133,16 @@ export function nativeLocationError(error) {
   return { code, message: String(error?.message || "Nie udało się ustalić lokalizacji") };
 }
 
-export function createNativeGeolocation(loadPlugin = async () => (await import("@capacitor/geolocation")).Geolocation) {
+export function createNativeGeolocation(loadPlugin = async () => ({ geolocation: (await import("@capacitor/geolocation")).Geolocation })) {
   let nextWatch = 0;
   const watches = new Map();
   let pendingPermission = null;
   const permittedPlugin = async (requestPermission = true) => {
-    const plugin = await loadPlugin();
+    // Capacitor plugins are dynamic proxies: even `then` looks like a method.
+    // Never resolve a Promise with that proxy, or Promise assimilation waits
+    // forever for a non-existent native `then`. Keep it inside a plain object.
+    const loaded = await loadPlugin();
+    const plugin = loaded.geolocation ?? loaded;
     let permission = await plugin.checkPermissions();
     if (permission.location === "prompt" || permission.location === "prompt-with-rationale") {
       if (!pendingPermission && requestPermission) {
@@ -151,13 +155,13 @@ export function createNativeGeolocation(loadPlugin = async () => (await import("
     if (permission.location !== "granted") {
       throw Object.assign(new Error("Brak zgody na lokalizację"), { code: "OS-PLUG-GLOC-0003" });
     }
-    return plugin;
+    return { plugin };
   };
   return {
     getCurrentPosition(success, failure, options) {
       const { requestPermission = true, ...positionOptions } = options || {};
       permittedPlugin(requestPermission)
-        .then((plugin) => plugin.getCurrentPosition(positionOptions))
+        .then(({ plugin }) => plugin.getCurrentPosition(positionOptions))
         .then(success, (error) => failure?.(nativeLocationError(error)));
     },
     watchPosition(success, failure, options) {
@@ -165,7 +169,7 @@ export function createNativeGeolocation(loadPlugin = async () => (await import("
       const id = ++nextWatch;
       const state = { cancelled: false, plugin: null, nativeId: null };
       watches.set(id, state);
-      permittedPlugin(requestPermission).then(async (plugin) => {
+      permittedPlugin(requestPermission).then(async ({ plugin }) => {
         state.plugin = plugin;
         if (state.cancelled) return;
         state.nativeId = await plugin.watchPosition(positionOptions, (position, error) => {

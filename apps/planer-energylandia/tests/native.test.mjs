@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   PUBLIC_APP_URL,
   createNativeGeolocation,
@@ -8,6 +9,22 @@ import {
   nativeLocationError,
   publicShareHref,
 } from "../src/native.js";
+
+test("the paper-colored iOS interface keeps status-bar text dark and legible", () => {
+  const config = JSON.parse(readFileSync(new URL("../capacitor.config.json", import.meta.url), "utf8"));
+  // Capacitor LIGHT describes the background, not the text color.
+  assert.equal(config.plugins.StatusBar.style, "LIGHT");
+  assert.equal(config.backgroundColor, "#fff8f0");
+});
+
+test("A4 print pages allow WebKit rounding and native export rejects extra sheets", () => {
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  const print = css.slice(css.indexOf("@media print"));
+  assert.match(print, /\.pdf-page \{[^}]*min-height: 296mm;/);
+  assert.match(print, /html, body, #root \{[^}]*min-height: 0 !important;/);
+  const plugin = readFileSync(new URL("../ios/App/App/PogodaParkPDFPlugin.swift", import.meta.url), "utf8");
+  assert.match(plugin, /count == expectedPages/);
+});
 
 test("native and local-file share links always use the public canonical app", () => {
   assert.equal(publicShareHref("capacitor://localhost/index.html#p/AbCdEfGhIjKlMn_o", true), PUBLIC_APP_URL);
@@ -136,6 +153,29 @@ test("native GPS maps permission and timeout failures to existing clear UI state
   assert.equal(nativeLocationError({ code: "OS-PLUG-GLOC-0008" }).code, 1);
   assert.equal(nativeLocationError({ code: "OS-PLUG-GLOC-0010" }).code, 3);
   assert.equal(nativeLocationError({ code: "OS-PLUG-GLOC-0007" }).code, 2);
+});
+
+test("Capacitor's thenable proxy is never assimilated by a GPS permission Promise", { timeout: 1000 }, async () => {
+  let thenReads = 0;
+  const position = { coords: { latitude: 50, longitude: 19, accuracy: 10 } };
+  const methods = {
+    checkPermissions: async () => ({ location: "granted" }),
+    getCurrentPosition: async () => position,
+    watchPosition: async (_options, callback) => { callback(position); return "native-watch"; },
+    clearWatch: async () => {},
+  };
+  const proxy = new Proxy(methods, { get(target, key) {
+    if (key === "then") { thenReads += 1; return () => {}; }
+    return target[key];
+  } });
+  const geolocation = createNativeGeolocation(async () => ({ geolocation: proxy }));
+  const current = await new Promise((resolve, reject) => geolocation.getCurrentPosition(resolve, reject));
+  assert.equal(current, position);
+  let watchId;
+  const watched = await new Promise((resolve, reject) => { watchId = geolocation.watchPosition(resolve, reject); });
+  assert.equal(watched, position);
+  geolocation.clearWatch(watchId);
+  assert.equal(thenReads, 0);
 });
 
 test("native GPS requests consent only when invoked and never reads position after denial", async () => {

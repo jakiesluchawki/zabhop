@@ -804,13 +804,15 @@ h1, h2 { font-family: "Romie", Georgia, serif; font-weight: 400; }
 
 @media print {
   @page { size: A4; margin: 0; }
-  html, body, #root { width: 210mm !important; height: auto !important; min-height: 297mm !important; overflow: visible !important; margin: 0 !important; background: white !important; color: #5c5935 !important; }
+  html, body, #root { width: 210mm !important; height: auto !important; min-height: 0 !important; overflow: visible !important; margin: 0 !important; background: white !important; color: #5c5935 !important; }
   body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .screen-app, .sheet-layer, .pdf-preview-toolbar { display: none !important; }
   .pdf-preview-layer { position: static; display: block; background: white; }
   .pdf-preview-scroll { overflow: visible; padding: 0; }
   .print-plan, .print-plan.is-preview { width: 210mm; margin: 0; display: block; }
-  .pdf-page { width: 210mm; min-height: 297mm; margin: 0; border: 0; border-radius: 0; padding: 14mm 15mm 17mm; box-shadow: none; break-after: page; page-break-after: always; }
+  /* Keep a 1 mm rounding allowance: WKWebView's print formatter otherwise
+     overflows an exact 297 mm box and inserts a blank sheet after every page. */
+  .pdf-page { width: 210mm; min-height: 296mm; margin: 0; border: 0; border-radius: 0; padding: 14mm 15mm 17mm; box-shadow: none; break-after: page; page-break-after: always; }
   .pdf-day-page { padding: 9mm 15mm 14mm; }
   .pdf-page:last-child { break-after: auto; page-break-after: auto; }
   .pdf-brand strong { font-size: 22pt; }

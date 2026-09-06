@@ -25,23 +25,23 @@ final class PogodaParkPDFPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             self.exporting = true
             webView.evaluateJavaScript("document.querySelectorAll('.print-plan .pdf-page').length") { value, error in
-                guard error == nil, let expectedPages = value as? Int, expectedPages > 0 else {
+                guard error == nil, let expectedPages = value as? Int, expectedPages > 0, expectedPages <= 30 else {
                     self.exporting = false
                     call.reject("Najpierw otwórz podgląd planu do zapisania w PDF.", "pdf-not-ready")
                     return
                 }
-                self.render(webView: webView, presenter: presenter, call: call)
+                self.render(webView: webView, presenter: presenter, expectedPages: expectedPages, call: call)
             }
         }
     }
 
-    private func render(webView: WKWebView, presenter: UIViewController, call: CAPPluginCall) {
+    private func render(webView: WKWebView, presenter: UIViewController, expectedPages: Int, call: CAPPluginCall) {
         let renderer = ItineraryPageRenderer()
         let formatter = webView.viewPrintFormatter()
         formatter.perPageContentInsets = .zero
         renderer.addPrintFormatter(formatter, startingAtPageAt: 0)
         let count = renderer.numberOfPages
-        guard count > 0, count <= 30 else {
+        guard count == expectedPages, count > 0, count <= 30 else {
             exporting = false
             call.reject("Nie udało się ułożyć stron PDF. Zamknij podgląd i otwórz go ponownie.", "pdf-render-failed")
             return

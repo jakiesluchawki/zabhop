@@ -41,11 +41,28 @@ final class AppStoreUITests: XCTestCase {
         for _ in 0..<16 {
             let frame = element.frame
             if element.isHittable && frame.midY > 60 && frame.midY < app.frame.height - 45 { return }
-            // Drag the page margin: a centre-screen swipe over Leaflet pans the
-            // map on iPad instead of revealing the next public page control.
+            // Drag actual page content, outside the live map. The narrow outer
+            // margin can fail to scroll WKWebView; the map itself consumes pans.
             let downward = frame.midY < 60
-            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: downward ? 0.28 : 0.78))
-            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.96, dy: downward ? 0.78 : 0.28))
+            let height = app.frame.height
+            var lower: CGFloat = 90
+            var upper = height - 70
+            let map = app.otherElements.matching(NSPredicate(format: "label BEGINSWITH %@", "Interaktywna mapa planu Energylandii")).firstMatch
+            if map.exists {
+                let mapFrame = map.frame
+                if mapFrame.maxY > lower && mapFrame.minY < upper {
+                    let aboveEnd = min(upper, mapFrame.minY - 24)
+                    let belowStart = max(lower, mapFrame.maxY + 24)
+                    if aboveEnd - lower > upper - belowStart { upper = aboveEnd }
+                    else { lower = belowStart }
+                }
+            }
+            XCTAssertGreaterThan(upper - lower, 100, "The page must leave a usable scrolling area outside the map", file: file, line: line)
+            let inset = (upper - lower) * 0.1
+            let startY = downward ? lower + inset : upper - inset
+            let endY = downward ? upper - inset : lower + inset
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY / height))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY / height))
             start.press(forDuration: 0.05, thenDragTo: end)
         }
         XCTAssertTrue(element.isHittable, "Control must be reachable without horizontal scrolling", file: file, line: line)
@@ -53,7 +70,9 @@ final class AppStoreUITests: XCTestCase {
 
     private func tap(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
         reveal(element, file: file, line: line)
-        element.tap()
+        // Use the visible control's centre instead of WebKit's inferred
+        // accessibility activation point, which can miss on iPad.
+        element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.1)
     }
 
     private func expectHeading(_ label: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -113,8 +132,60 @@ final class AppStoreUITests: XCTestCase {
         }
     }
 
+    func test15SavedPlanPDFExport() throws {
+        app.launch()
+        tap(app.buttons["Wróć do zapisanego planu"])
+        expectHeading("Wasza Energylandia")
+        tap(app.buttons["Przygotuj piękny PDF"])
+        capture("12-pdf-preview")
+        tap(app.buttons["Drukuj / zapisz"])
+        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 30), "Actual PDF must reach the native share sheet")
+        capture("13-native-pdf-share-sheet")
+    }
+
+    func test20SavedPlanNativeSharing() throws {
+        app.launch()
+        tap(app.buttons["Wróć do zapisanego planu"])
+        expectHeading("Wasza Energylandia")
+        tap(app.buttons["Kopiuj link"])
+        let urlField = app.textFields["Krótki link do planu"]
+        XCTAssertTrue(urlField.waitForExistence(timeout: 30), "Native HTTP must create a durable short link")
+        let url = urlField.value as? String ?? ""
+        XCTAssertNotNil(url.range(of: "^https://jakiesluchawki\\.github\\.io/zabhop/planer-energylandia/(\\?r[a-f0-9]+)?#p/[A-Za-z0-9_-]{16}$", options: .regularExpression))
+        let attachment = XCTAttachment(string: url)
+        attachment.name = "NATIVE_QA_SHORT_LINK"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        capture("18-short-link-created")
+        tap(app.buttons["Udostępnij plan"])
+        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 15))
+        capture("19-native-plan-share-sheet")
+        dumpHierarchy("NATIVE_PLAN_SHARE")
+        if #available(iOS 16.4, *) {
+            let fragment = try XCTUnwrap(URL(string: url)?.fragment)
+            app.terminate()
+            app.open(try XCTUnwrap(URL(string: "pogodapark://" + fragment)))
+            expectHeading("Wasza Energylandia")
+            XCTAssertTrue(button(containing: "Dzień 3").exists)
+            capture("22-opened-shared-plan")
+
+            let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+            safari.open(try XCTUnwrap(URL(string: url)))
+            XCTAssertTrue(safari.staticTexts["Wasza Energylandia"].firstMatch.waitForExistence(timeout: 40))
+            XCTAssertTrue(safari.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Dzień 3")).firstMatch.exists)
+            let screenshot = XCTAttachment(screenshot: safari.screenshot())
+            screenshot.name = "23-shared-plan-in-safari"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+        } else {
+            throw XCTSkip("System URL round-trip QA requires iOS 16.4 or newer")
+        }
+    }
+
     func test10ThreeDayPlanReplacementPersistenceAndPDF() throws {
         app.launch()
+        XCTAssertTrue(button(containing: "Decyzja podjęta — ułóż plan").waitForExistence(timeout: 30))
+        capture("01-entry")
         tap(button(containing: "Decyzja podjęta — ułóż plan"))
         tap(app.buttons["Zaczynamy"])
 
@@ -238,5 +309,48 @@ final class AppStoreUITests: XCTestCase {
         print("POGODAPARK_PDF_READY_FOR_QA_COPY — keep system share sheet open; temporary PDF remains in app container")
         // Deliberately do not dismiss: the release operator copies the real PDF
         // from the app's temporary container before the share completion cleanup.
+    }
+
+    func test30LocationDenialIsHonest() throws {
+        // The release runner explicitly denies location for this QA simulator.
+        app.launch()
+        tap(app.buttons["Wróć do zapisanego planu"])
+        expectHeading("Wasza Energylandia")
+        tap(button(containing: "Włącz lokalizację"))
+        let prompt = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if prompt.waitForExistence(timeout: 5) {
+            let deny = prompt.buttons.matching(NSPredicate(format: "label IN %@", ["Nie pozwalaj", "Don't Allow", "Don’t Allow"])).firstMatch
+            XCTAssertTrue(deny.exists)
+            deny.tap()
+        }
+        let denial = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Lokalizacja jest zablokowana.")).firstMatch
+        XCTAssertTrue(denial.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "GPS włączony")).firstMatch.exists)
+        reveal(denial)
+        capture("20-location-denied")
+    }
+
+    func test35ForegroundLocationDistances() throws {
+        // The runner grants foreground permission and supplies a park test fix.
+        app.launch()
+        tap(app.buttons["Wróć do zapisanego planu"])
+        expectHeading("Wasza Energylandia")
+        let locate = button(containing: "Włącz lokalizację")
+        if locate.exists { tap(locate) }
+        let prompt = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.firstMatch
+        if prompt.waitForExistence(timeout: 5) {
+            let allow = prompt.buttons.matching(NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@", "używ", "While Using")).firstMatch
+            XCTAssertTrue(allow.exists)
+            allow.tap()
+        }
+        let ready = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "GPS włączony")).firstMatch
+        XCTAssertTrue(ready.waitForExistence(timeout: 30))
+        XCTAssertTrue(button(containing: "Odśwież GPS").exists)
+        capture("21-location-distances")
+        dumpHierarchy("GPS_DISTANCES")
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(button(containing: "Decyzja podjęta — ułóż plan").waitForExistence(timeout: 30))
+        capture("01-entry")
     }
 }
