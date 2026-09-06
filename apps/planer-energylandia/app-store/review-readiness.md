@@ -2,6 +2,15 @@
 
 Prepared 2026-09-04 and updated 2026-09-06 for the iOS app in `apps/planer-energylandia`. This is a source audit and submission checklist, not evidence of App Review approval.
 
+## Final submission — 2026-09-06, 08:31 UTC
+
+- **Submitted to Apple; verified state `WAITING_FOR_REVIEW`.** Version **1.0**, build **20260906072000**, app **6808553115**, build ID `d42e1b8e-bace-49b8-a534-fb163a8ca2dd`, review submission `3d613da3-1e84-4efc-a6b7-335963146d22`.
+- The signed archive was built from source commit **`550b7cc3a0e318aad9acf44e7656faf082885c4e`** after all **198 automated tests** passed. Upload finished at 08:28 UTC; Apple confirmed **VALID / APP_STORE_ELIGIBLE**, non-exempt encryption `false`, at 08:30 UTC. The older build `20260906064500` was not submitted.
+- Apple accepted the exact final build attachment, validated the review item, and confirmed entry into the review queue at **08:31:42 UTC**. This is not approval or public App Store availability. Release remains **AFTER_APPROVAL**, free and available in Poland.
+- **12 actual native screenshots** were uploaded: six iPhone 1320 × 2868 and six iPad 2064 × 2752. All reached **COMPLETE**, with checksums and order verified. The first immediate read was conservatively rejected while Apple had not yet returned a checksum for a freshly uploaded image; the later verification reused the same images without replacement or reordering.
+- Web deployment [34021841269](https://github.com/jakiesluchawki/zabhop/actions/runs/34021841269) succeeded. Production release `550b7cc3a0e3`, planner, privacy, support, legacy weather entry and `/premiera/` were checked at 08:28 UTC; all returned HTTP 200. The new print CSS was present, and root ŻabHop `app.js` matched canonical source byte for byte. A browser smoke check also completed the weather load with timestamped sources and returned to the entry screen.
+- Native QA slot was released after upload: both PogodaPark simulators are shut down, no native build remains running, and the release runner restored the dedicated signing keychain's previous lock state. Private upload, screenshot and review receipts remain under ignored `.local/pogodapark/`.
+
 ## Release evidence — 2026-09-06
 
 - Commit `d30e6c5be714c79cec1c0c02239c40d5d80f37ad` passed 195 tests and was published by [GitHub Actions run 34017567903](https://github.com/jakiesluchawki/zabhop/actions/runs/34017567903).
@@ -9,7 +18,7 @@ Prepared 2026-09-04 and updated 2026-09-06 for the iOS app in `apps/planer-energ
 - Signed version **1.0**, build **20260906064500**, uploaded successfully at 06:58 UTC. App Store Connect confirmed **VALID / APP_STORE_ELIGIBLE** at 07:03 UTC; build ID `e614731a-df06-4460-bdaa-a913b2029ec4`, non-exempt encryption `false`.
 - The native entry smoke test passed on the warmed iPhone simulator at 07:20 UTC (test body 15.243 s). Earlier Apple Simulator Instruments/Accessibility initialization stalled; a later direct boot exposed repeated Apple `backboardd` crashes in `SimHIDMainScreenTouchServiceCallbackProvider`, before the app launched. Restarting the idle simulator service restored a 9-second boot without erasing devices. The first post-recovery UI test failed while WebKit remained blank, and is preserved as a failed result; a direct launch and the subsequent warmed smoke test rendered the bundled interface.
 - Native visual QA found low-contrast white status-bar text over the warm-paper background. Capacitor's `LIGHT` setting means dark foreground text; the configuration was corrected and covered by a regression test. The full suite now passes **196 tests**. This fix requires a new uploaded build after native verification.
-- No review submission has been made. At 07:13 UTC, App Store Connect's website showed App Privacy **Published 2 days ago**, with **Other User Content / Other Data Types**, both used for App Functionality and not linked to identity. The detailed preview matched. No existing privacy settings were changed.
+- At that intermediate stage no review submission had been made; the final submission is recorded above. At 07:13 UTC, App Store Connect's website showed App Privacy **Published 2 days ago**, with **Other User Content / Other Data Types**, both used for App Functionality and not linked to identity. The detailed preview matched. No existing privacy settings were changed.
 
 ### Native QA after the status-bar correction
 
@@ -104,7 +113,7 @@ Relevant primary references: [Apple App Review Guidelines](https://developer.app
 - [x] Actual iPhone GPS permission denial/grant, native share, URL-only clipboard and exported PDF verified. Timeout-to-UI mapping is covered by automated tests; map action visibility and exact walking destinations are checked without claiming a completed external navigation journey.
 - [x] Bundled local-code launch and saved-plan persistence are covered by source/automated checks and native relaunch. Snapshot-age tests preserve original timestamps. A physical offline/airplane-mode test has not been performed.
 - [x] Short link created by the native app opens in Safari and through a cold native activation, preserving three days and safe group/ride semantics.
-- [ ] Support/privacy pages deployed and reachable, and in-app links verified in release build.
+- [x] Support/privacy pages deployed and reachable. Native source and archived bundle use the canonical public URLs, and native screenshots/hierarchy expose both links; no separate physical-device external-browser journey is claimed.
 - [x] Owner's third-party rights declaration and source/terms attribution recorded; production Worker logs/traces inspected against the audited data flow, with provider-policy limits stated above.
-- [x] Published App Privacy, age rating, export compliance for the first uploaded build, free pricing and Poland availability verified. Final replacement-build processing is a separate gate.
-- [ ] Archive validation, upload, processing, screenshots and submission state recorded separately; no claim of approval until Apple confirms it.
+- [x] Published App Privacy, age rating, final-build export compliance, free pricing and Poland availability verified; Apple's review-item validation accepted the submission.
+- [x] Archive validation, upload, processing, screenshots and submission state recorded separately above; **WAITING_FOR_REVIEW**, not approved.
