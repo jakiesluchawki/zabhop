@@ -1,3 +1,5 @@
+import { loadLiveSnapshot } from "./native.js";
+
 const OFFICIAL_PARK_CALENDAR_URL = "https://energylandia.pl/kalendarz/";
 const PARK_CALENDAR_MAX_AGE_MINUTES = 36 * 60;
 const PARK_CALENDAR_MAX_AGE_MS = PARK_CALENDAR_MAX_AGE_MINUTES * 60_000;
@@ -196,12 +198,7 @@ export function parkDayForDate(calendar, dateKey, options = {}) {
 }
 
 export async function loadParkCalendar(signal) {
-  const response = await fetch(`${import.meta.env.BASE_URL}park-calendar.json`, {
-    signal,
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`Kalendarz parku: HTTP ${response.status}`);
-  return normalizeParkCalendar(await response.json());
+  return normalizeParkCalendar(await loadLiveSnapshot("park-calendar.json", { signal }));
 }
 
 export { OFFICIAL_PARK_CALENDAR_URL, PARK_CALENDAR_MAX_AGE_MINUTES };

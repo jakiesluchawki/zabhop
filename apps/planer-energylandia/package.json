@@ -1,6 +1,6 @@
 {
   "name": "planer-energylandia",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,14 +10,28 @@
     "refresh:queues": "node scripts/fetch-queues.mjs",
     "refresh:calendar": "node scripts/fetch-park-calendar.mjs",
     "refresh:shows": "node scripts/fetch-shows.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "ios:sync": "npm run build && cap sync ios",
+    "ios:build": "sh scripts/build-ios.sh",
+    "ios:release": "sh scripts/release-ios.sh"
   },
   "dependencies": {
+    "@capacitor/app": "8.1.1",
+    "@capacitor/clipboard": "8.0.1",
+    "@capacitor/core": "8.4.1",
+    "@capacitor/geolocation": "8.2.2",
+    "@capacitor/ios": "8.4.1",
+    "@capacitor/share": "8.0.1",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.3",
     "@phosphor-icons/react": "^2.1.10",
     "@vitejs/plugin-react": "5.0.4",
     "leaflet": "^1.9.4",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "vite": "6.4.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.4.1"
   }
 }

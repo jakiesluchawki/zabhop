@@ -77,6 +77,7 @@ import {
   queueFreshness,
 } from "./appUtils.js";
 import {
+  createLocationRequestState,
   geolocationFailureStatus,
   positionFromCoordinates,
   QUICK_LOCATION_OPTIONS,
@@ -103,6 +104,8 @@ import {
 import { assessThreeDayWeather } from "./weatherPlan.js";
 import { RainSafetyCard, WeatherStart } from "./WeatherStart.jsx";
 import { EntryStart } from "./EntryStart.jsx";
+import { AppInfoLinks } from "./AppInfoLinks.jsx";
+import { appGeolocation, copyUrl, isNativeApp, listenNativeAppState, printPlan, PUBLIC_APP_URL, shareUrl } from "./native.js";
 
 const DRAFT_KEY = "energylandia-planner-v1:draft";
 const PLAN_KEY = "energylandia-planner-v1:plan";
@@ -282,17 +285,19 @@ function safeSanitizePlan(value) {
 }
 
 function useUserLocation() {
+  const geolocation = appGeolocation();
   const [position, setPosition] = useState(null);
   const [status, setStatus] = useState("idle");
   const watchRef = useRef(null);
   const positionRef = useRef(null);
-  const requestRef = useRef(0);
-  const resumeTrackingRef = useRef(false);
+  const requestStateRef = useRef(null);
+  if (!requestStateRef.current) requestStateRef.current = createLocationRequestState(document.visibilityState !== "hidden");
+  const requestState = requestStateRef.current;
 
   const clearTracking = useCallback(() => {
-    if (watchRef.current != null) navigator.geolocation?.clearWatch(watchRef.current);
+    if (watchRef.current != null) geolocation?.clearWatch(watchRef.current);
     watchRef.current = null;
-  }, []);
+  }, [geolocation]);
 
   const acceptPosition = useCallback((coords) => {
     const nextPosition = positionFromCoordinates(coords);
@@ -304,18 +309,19 @@ function useUserLocation() {
   }, []);
 
   const startTracking = useCallback((request) => {
-    if (!navigator.geolocation || request !== requestRef.current) return;
+    if (!geolocation || !requestState.accepts(request) || document.visibilityState === "hidden") return;
     clearTracking();
-    watchRef.current = navigator.geolocation.watchPosition(
+    watchRef.current = geolocation.watchPosition(
       ({ coords }) => {
-        if (request !== requestRef.current) return;
+        if (!requestState.accepts(request)) return;
         acceptPosition(coords);
       },
       (error) => {
-        if (request !== requestRef.current) return;
+        if (!requestState.accepts(request)) return;
         clearTracking();
         const failure = geolocationFailureStatus(error);
         if (failure === "denied") {
+          requestState.cancel();
           positionRef.current = null;
           setPosition(null);
           setStatus("denied");
@@ -325,32 +331,33 @@ function useUserLocation() {
         // accuracy watcher temporarily loses its signal in the park.
         setStatus(positionRef.current ? "ready" : failure);
       },
-      TRACKING_LOCATION_OPTIONS,
+      { ...TRACKING_LOCATION_OPTIONS, requestPermission: false },
     );
-  }, [acceptPosition, clearTracking]);
+  }, [acceptPosition, clearTracking, geolocation, requestState]);
 
-  const locate = useCallback(() => {
-    if (!navigator.geolocation) {
+  const locate = useCallback(({ resume = false } = {}) => {
+    if (!geolocation) {
       positionRef.current = null;
       setPosition(null);
       setStatus("unsupported");
       return;
     }
-    const request = requestRef.current + 1;
-    requestRef.current = request;
+    const request = requestState.begin();
+    if (!requestState.accepts(request) || document.visibilityState === "hidden") return;
     clearTracking();
     setStatus(positionRef.current ? "refreshing" : "loading");
     try {
-      navigator.geolocation.getCurrentPosition(
+      geolocation.getCurrentPosition(
         ({ coords }) => {
-          if (request !== requestRef.current) return;
+          if (!requestState.accepts(request)) return;
           if (acceptPosition(coords)) startTracking(request);
           else setStatus("error");
         },
         (error) => {
-          if (request !== requestRef.current) return;
+          if (!requestState.accepts(request)) return;
           const failure = geolocationFailureStatus(error);
           if (failure === "denied") {
+            requestState.cancel();
             positionRef.current = null;
             setPosition(null);
             setStatus("denied");
@@ -361,12 +368,12 @@ function useUserLocation() {
           setStatus(positionRef.current ? "refreshing" : "loading");
           startTracking(request);
         },
-        QUICK_LOCATION_OPTIONS,
+        { ...QUICK_LOCATION_OPTIONS, requestPermission: !resume },
       );
     } catch {
       setStatus("error");
     }
-  }, [acceptPosition, clearTracking, startTracking]);
+  }, [acceptPosition, clearTracking, geolocation, requestState, startTracking]);
 
   useEffect(() => {
     let cancelled = false;
@@ -376,7 +383,7 @@ function useUserLocation() {
       if (permission.state === "granted" && document.visibilityState !== "hidden") {
         if (watchRef.current == null) locate();
       } else if (permission.state === "denied") {
-        requestRef.current += 1;
+        requestState.cancel();
         clearTracking();
         positionRef.current = null;
         setPosition(null);
@@ -385,7 +392,7 @@ function useUserLocation() {
         if (!positionRef.current) setStatus("idle");
       }
     };
-    navigator.permissions?.query?.({ name: "geolocation" }).then((result) => {
+    if (!isNativeApp()) navigator.permissions?.query?.({ name: "geolocation" }).then((result) => {
       if (cancelled) return;
       permission = result;
       syncPermission();
@@ -394,25 +401,34 @@ function useUserLocation() {
     return () => {
       cancelled = true;
       permission?.removeEventListener?.("change", syncPermission);
-      requestRef.current += 1;
+      requestState.cancel();
       clearTracking();
     };
-  }, [clearTracking, locate]);
+  }, [clearTracking, locate, requestState]);
 
   useEffect(() => {
+    let nativeActive = true;
     const syncVisibility = () => {
-      if (document.visibilityState === "hidden") {
-        resumeTrackingRef.current = watchRef.current != null;
-        if (resumeTrackingRef.current) clearTracking();
+      if (!nativeActive || document.visibilityState === "hidden") {
+        requestState.setActive(false);
+        clearTracking();
         return;
       }
-      if (!resumeTrackingRef.current) return;
-      resumeTrackingRef.current = false;
-      locate();
+      if (requestState.setActive(true)) locate({ resume: true });
     };
     document.addEventListener("visibilitychange", syncVisibility);
-    return () => document.removeEventListener("visibilitychange", syncVisibility);
-  }, [clearTracking, locate]);
+    const removeNativeListener = listenNativeAppState((active) => {
+      nativeActive = active;
+      syncVisibility();
+    });
+    syncVisibility();
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      removeNativeListener();
+      requestState.cancel();
+      clearTracking();
+    };
+  }, [clearTracking, locate, requestState]);
 
   return { position, status, locate };
 }
@@ -505,9 +521,10 @@ function Welcome({ onStart, onBack, onResume, backLabel = "Wróć do początku" 
         <footer>
           <button className="primary-button" type="button" onClick={onStart}>Zaczynamy <ArrowRight size={22} weight="bold" /></button>
           {onResume && <button className="resume-button" type="button" onClick={onResume}>Wróć do zapisanego planu</button>}
-          <small>Bez konta. Odpowiedzi i lokalizacja zostają w tej przeglądarce.</small>
+          <small>Bez konta. Plan zapisuje się na tym urządzeniu. GPS jest opcjonalny.</small>
         </footer>
       </article>
+      <AppInfoLinks showNote />
     </main>
   );
 }
@@ -817,6 +834,7 @@ function Onboarding({
         )}
       </section>
 
+      <AppInfoLinks />
       <footer className="wizard-footer">
         {step < STEP_LABELS.length - 1 ? (
           <button className="primary-button" type="button" disabled={!canContinue} onClick={() => goToStep(step + 1)}>Dalej <ArrowRight size={20} weight="bold" /></button>
@@ -1151,6 +1169,7 @@ function PrintablePlan({ plan, planUrl, preview = false }) {
 function PdfPreview({ plan, planUrl, onClose }) {
   const closeRef = useRef(null);
   const [preparing, setPreparing] = useState(false);
+  const [printError, setPrintError] = useState("");
 
   useLayoutEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -1166,11 +1185,14 @@ function PdfPreview({ plan, planUrl, onClose }) {
 
   const printDocument = async () => {
     setPreparing(true);
+    setPrintError("");
     try {
       await document.fonts?.ready;
       const images = [...document.querySelectorAll(".pdf-preview-layer .print-plan img")];
       await Promise.all(images.map((image) => image.complete ? image.decode?.().catch(() => {}) : new Promise((resolve) => { image.addEventListener("load", resolve, { once: true }); image.addEventListener("error", resolve, { once: true }); })));
-      window.print();
+      await printPlan();
+    } catch {
+      setPrintError("Nie udało się przygotować PDF. Spróbuj ponownie.");
     } finally {
       setPreparing(false);
     }
@@ -1179,7 +1201,7 @@ function PdfPreview({ plan, planUrl, onClose }) {
   return (
     <section className="pdf-preview-layer" role="dialog" aria-modal="true" aria-label="Podgląd dokumentu PDF">
       <header className="pdf-preview-toolbar"><button ref={closeRef} type="button" onClick={onClose}><ArrowLeft size={19} weight="bold" /> Wróć do planu</button><span><strong>Wasz piękny PDF</strong><small>Podgląd stron A4</small></span><button className="pdf-print-action" type="button" onClick={printDocument} disabled={preparing}><Printer size={19} weight="bold" /> {preparing ? "Przygotowuję…" : "Drukuj / zapisz"}</button></header>
-      <div className="pdf-preview-scroll"><PrintablePlan plan={plan} planUrl={planUrl} preview /></div>
+      <div className="pdf-preview-scroll">{printError && <p className="location-message warning" role="alert">{printError}</p>}<PrintablePlan plan={plan} planUrl={planUrl} preview /></div>
     </section>
   );
 }
@@ -1487,12 +1509,7 @@ function PlanView({
   const share = async () => {
     try {
       const url = await ensureShortPlanUrl();
-      if (navigator.share) {
-        await navigator.share({ url });
-        return;
-      }
-      await navigator.clipboard.writeText(url);
-      setNotice("Krótki link skopiowany");
+      if (await shareUrl(url) === "copied") setNotice("Krótki link skopiowany");
     } catch (error) {
       if (error?.name !== "AbortError") setNotice("Nie udało się otworzyć udostępniania");
     }
@@ -1500,7 +1517,7 @@ function PlanView({
   const copy = async () => {
     try {
       const url = await ensureShortPlanUrl();
-      await navigator.clipboard.writeText(url);
+      await copyUrl(url);
       setNotice("Krótki link skopiowany");
     } catch {
       setNotice("Nie udało się utworzyć krótkiego linku");
@@ -1508,21 +1525,20 @@ function PlanView({
   };
   const copyLocalFallback = async () => {
     try {
-      await navigator.clipboard.writeText(compactPlanUrl);
+      await copyUrl(compactPlanUrl);
       setNotice("Skopiowano lokalny, długi link");
     } catch {
       setShowLocalFallback(true);
       setNotice("Lokalny link zaznaczony — wybierz Kopiuj");
     }
   };
-  const openEmail = async (event) => {
+  const openEmail = (event) => {
     event.preventDefault();
     if (!email || !event.currentTarget.reportValidity()) return;
     try {
-      const url = await ensureShortPlanUrl();
-      window.location.href = createEmailDraftUrl(email, url, plan);
+      window.location.href = createEmailDraftUrl(email, PUBLIC_APP_URL, plan);
     } catch {
-      setNotice("Nie udało się utworzyć krótkiego linku do e-maila");
+      setNotice("Nie udało się otworzyć szkicu e-maila");
     }
   };
 
@@ -1555,8 +1571,8 @@ function PlanView({
           {locationStatus === "ready" && <p className="location-message location-ready" role="status"><Crosshair size={15} weight="fill" /> GPS włączony — odległości w planie są liczone od waszej aktualnej pozycji{locationAccuracy ? ` (dokł. około ±${locationAccuracy} m)` : ""}.</p>}
           {locationStatus === "timeout" && <p className="location-message warning" role="status">Nie udało się szybko ustalić pozycji. Przejdź bliżej otwartej przestrzeni i <button type="button" onClick={locate}>spróbuj GPS ponownie</button>.</p>}
           {locationStatus === "error" && <p className="location-message warning" role="status">Nie udało się odczytać pozycji telefonu. <button type="button" onClick={locate}>Spróbuj GPS ponownie</button>.</p>}
-          {locationStatus === "denied" && <p className="location-message warning" role="status">Lokalizacja jest zablokowana. Włącz ją dla tej strony w ustawieniach przeglądarki, aby zobaczyć metry w planie.</p>}
-          {locationStatus === "unsupported" && <p className="location-message warning" role="status">Ta przeglądarka nie udostępnia lokalizacji, więc nie pokażemy uczciwych odległości od was.</p>}
+          {locationStatus === "denied" && <p className="location-message warning" role="status">{isNativeApp() ? "Lokalizacja jest zablokowana. W ustawieniach iPhone’a otwórz PogodaPark → Lokalizacja i zezwól na dostęp podczas używania aplikacji, aby zobaczyć metry w planie." : "Lokalizacja jest zablokowana. Włącz ją dla tej strony w ustawieniach przeglądarki, aby zobaczyć metry w planie."}</p>}
+          {locationStatus === "unsupported" && <p className="location-message warning" role="status">{isNativeApp() ? "Lokalizacja jest teraz niedostępna, więc nie pokażemy odległości od was." : "Ta przeglądarka nie udostępnia lokalizacji, więc nie pokażemy uczciwych odległości od was."}</p>}
           <div className="day-stats"><span><Clock size={16} /> {day.stats.start}–{day.stats.end}</span><span><MapTrifold size={16} /> ~{day.stats.walkingMinutes} min marszu</span><span><CheckCircle size={16} /> {completedToday}/{dayAttractionIds.length}</span></div>
           {selectedDayOfficialHours && <p className="queue-snapshot">Oficjalne godziny tego dnia: {selectedParkDay.opensAt}–{selectedParkDay.closesAt} · {calendarFreshness.label}.{sharedPlanWindow ? ` Wspólny plan wszystkich dni: ${day.stats.start}–${day.stats.end}.` : ""} <a href={selectedParkDay.sourceUrl || OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Kalendarz parku</a>.</p>}
           {selectedParkDay.state === "unknown" && parkCalendarStatus !== "loading" && <p className="queue-snapshot">Godziny działania w tym dniu nie są potwierdzone. <a href={OFFICIAL_PARK_CALENDAR_URL} target="_blank" rel="noreferrer">Sprawdź oficjalny kalendarz parku</a>.</p>}
@@ -1596,7 +1612,7 @@ function PlanView({
               ? <input ref={shareUrlRef} className="share-url" readOnly value={compactPlanUrl} aria-label="Lokalny, długi link do planu" />
               : shortLinkStatus === "idle" && <p className="data-status"><span />Kliknij „Kopiuj link”, aby stworzyć krótki adres do komunikatora.</p>}
         </section>
-        <footer className="app-footer">Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji i pokazów, OpenStreetMap oraz Queue-Times.</footer>
+        <footer className="app-footer">PogodaPark to niezależna, nieoficjalna aplikacja. Plan jest pomocą, nie regulaminem. Ograniczenia przy wejściu, pomiar i polecenia obsługi Energylandii zawsze mają pierwszeństwo. Źródła: oficjalne strony atrakcji i pokazów oraz OpenStreetMap. <a href="https://queue-times.com/" target="_blank" rel="noreferrer">Powered by Queue-Times.com</a>.<AppInfoLinks /></footer>
         {notice && <div className="toast" role="status">{notice}</div>}
       </main>
       {showPdfPreview && <PdfPreview plan={plan} planUrl={planUrl} onClose={() => setShowPdfPreview(false)} />}

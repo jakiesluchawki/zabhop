@@ -623,6 +623,11 @@ h1, h2 { font-family: "Romie", Georgia, serif; font-weight: 400; }
 .email-box small { grid-column: 1 / -1; font-size: 10px; line-height: 1.4; color: rgba(66,63,35,.82); }
 .share-url { width: 100%; min-height: 44px; margin-top: 8px; border: 1px solid var(--soft-line); border-radius: 10px; padding: 8px 9px; color: rgba(66,63,35,.84); background: transparent; font-size: 16px; }
 .app-footer { padding: 18px 12px 0; text-align: center; font-size: 11px; line-height: 1.5; color: rgba(66,63,35,.88); }
+.app-info { margin-top: 12px; color: rgba(66,63,35,.88); text-align: center; font-size: 10px; line-height: 1.4; }
+.app-info p { max-width: 390px; margin: 0 auto; }
+.app-info nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 18px; }
+.app-info a { min-height: 44px; display: inline-flex; align-items: center; color: #6130c4; font-size: 11px; text-underline-offset: 3px; }
+.app-info a:focus-visible { outline: 3px solid var(--violet); outline-offset: 3px; border-radius: 3px; }
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 5000; width: max-content; max-width: calc(100% - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right))); transform: translateX(-50%); border-radius: 99px; padding: 10px 17px; color: var(--paper); background: var(--olive); box-shadow: var(--shadow); font-size: 11px; line-height: 1.35; text-align: center; font-weight: 700; }
 
 /* Detail sheet */
@@ -799,7 +804,7 @@ h1, h2 { font-family: "Romie", Georgia, serif; font-weight: 400; }
 
 @media print {
   @page { size: A4; margin: 0; }
-  html, body, #root { width: 210mm !important; min-height: 297mm !important; margin: 0 !important; background: white !important; color: #5c5935 !important; }
+  html, body, #root { width: 210mm !important; height: auto !important; min-height: 297mm !important; overflow: visible !important; margin: 0 !important; background: white !important; color: #5c5935 !important; }
   body { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   .screen-app, .sheet-layer, .pdf-preview-toolbar { display: none !important; }
   .pdf-preview-layer { position: static; display: block; background: white; }

@@ -1,3 +1,5 @@
+import { isNativeApp } from "./native.js";
+
 const FALLBACK_RELEASE = "dev";
 const UPDATE_STORAGE_KEY = "pogodapark:last-release-reload";
 const RELOAD_GUARD_MS = 30_000;
@@ -53,9 +55,10 @@ export async function checkForAppUpdate({
   locationRef = typeof window === "undefined" ? null : window.location,
   storage = accessibleSessionStorage(),
   now = Date.now(),
+  native = isNativeApp(),
 } = {}) {
   const currentRelease = normalizedRelease(release);
-  if (!currentRelease || !locationRef?.href || typeof fetchImpl !== "function") {
+  if (native || !currentRelease || !locationRef?.href || typeof fetchImpl !== "function") {
     return { state: "disabled", release: currentRelease };
   }
 
@@ -84,8 +87,9 @@ export function startAppUpdateChecks({
   windowRef = typeof window === "undefined" ? null : window,
   documentRef = typeof document === "undefined" ? null : document,
   check = checkForAppUpdate,
+  native = isNativeApp(),
 } = {}) {
-  if (!normalizedRelease(release) || !windowRef || !documentRef) return () => {};
+  if (native || !normalizedRelease(release) || !windowRef || !documentRef) return () => {};
 
   let inFlight = null;
   const refresh = () => {

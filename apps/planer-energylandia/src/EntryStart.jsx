@@ -1,4 +1,6 @@
 import { ArrowRight, CloudSun, MapTrifold } from "@phosphor-icons/react";
+import { AppInfoLinks } from "./AppInfoLinks.jsx";
+import { isNativeApp } from "./native.js";
 
 export function EntryStart({ onWeather, onPlan, onResume }) {
   return (
@@ -7,7 +9,7 @@ export function EntryStart({ onWeather, onPlan, onResume }) {
         <header className="entry-brand">
           <img src={`${import.meta.env.BASE_URL}icon-192-v3.png`} alt="" width="42" height="42" />
           <div><p>PogodaPark</p><span>ENERGYLANDIA • POGODA + PLAN</span></div>
-          <span>BETA</span>
+          {!isNativeApp() && <span>BETA</span>}
         </header>
 
         <section className="entry-intro">
@@ -40,8 +42,9 @@ export function EntryStart({ onWeather, onPlan, onResume }) {
           {onResume && <button className="entry-resume" type="button" onClick={onResume}>Wróć do zapisanego planu</button>}
         </section>
 
-        <footer>Bez konta. Pogoda i kolejki są odświeżane, a odpowiedzi zostają w tej przeglądarce.</footer>
+        <footer>Bez konta. Pogoda i kolejki są odświeżane, a zapisany plan zostaje na tym urządzeniu.</footer>
       </article>
+      <AppInfoLinks showNote />
     </main>
   );
 }

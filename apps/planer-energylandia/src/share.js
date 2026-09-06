@@ -1,6 +1,7 @@
 import { ALL_ATTRACTIONS_BY_ID, RESTAURANTS } from "./extendedData.js";
 import { formatPlanTime, timeToMinutes, validatePlanSafety } from "./planner.js";
 import { APP_RELEASE, withReleaseQuery } from "./appUpdate.js";
+import { fetchShortLink, publicShareHref } from "./native.js";
 
 const MAX_MEMBERS = 14;
 // Jeden dobrowolny pokaz może wejść do trasy, ale nie powinien zjadać miejsca
@@ -961,7 +962,7 @@ function currentHref(fallback = "https://example.invalid/") {
 }
 
 export function createPlanUrl(plan, href = currentHref(), release = APP_RELEASE) {
-  const url = new URL(href);
+  const url = new URL(publicShareHref(href));
   const payload = encodePlan(plan);
   url.hash = payload ? `plan=${payload}` : "";
   return withReleaseQuery(url.toString(), release);
@@ -1022,7 +1023,7 @@ function requireShortLinkApi(apiBase) {
 }
 
 function requireFetch(fetchImpl) {
-  const resolved = fetchImpl ?? globalThis.fetch;
+  const resolved = fetchImpl ?? fetchShortLink;
   if (typeof resolved !== "function") {
     throw new ShortLinkError("unavailable", "Ta przeglądarka nie może teraz połączyć się z usługą krótkich linków.");
   }
@@ -1069,7 +1070,7 @@ export function hasShortPlanHash(hash = typeof window !== "undefined" ? window.l
 
 export function createShortPlanUrl(token, href = currentHref(), release = APP_RELEASE) {
   if (!SHORT_PLAN_TOKEN_PATTERN.test(String(token || ""))) return "";
-  const url = new URL(href);
+  const url = new URL(publicShareHref(href));
   url.hash = `p/${token}`;
   return withReleaseQuery(url.toString(), release);
 }

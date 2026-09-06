@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#fff8f0">
+  <meta name="description" content="Jak PogodaPark korzysta z danych: plan na urządzeniu, opcjonalna lokalizacja i anonimowe krótkie linki.">
+  <title>PogodaPark — prywatność / privacy</title>
+  <style>
+    @font-face{font-family:Roobert;src:url('./fonts/Roobert-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+    @font-face{font-family:Roobert;src:url('./fonts/Roobert-Bold.woff2') format('woff2');font-weight:700;font-display:swap}
+    @font-face{font-family:Romie;src:url('./fonts/Romie-Regular.woff2') format('woff2');font-weight:400;font-display:swap}
+    :root{font-family:Roobert,system-ui,sans-serif;color:#5c5935;background:#f8e8e3;font-synthesis:none}*{box-sizing:border-box}body{margin:0;background:linear-gradient(#f8e8e3ed,#f8e8e3ed),url('./assets/felt-paper.jpg') center/720px auto}main{max-width:800px;margin:auto;padding:max(20px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}header,footer{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}header{margin-bottom:20px}header>a:first-child{font:30px Romie,Georgia,serif;text-decoration:none;color:#5c5935}a{color:#6638bf;text-underline-offset:3px;overflow-wrap:anywhere}a:focus-visible{outline:3px solid #7442d9;outline-offset:4px}nav{display:flex;gap:20px}nav a,footer a{display:inline-flex;align-items:center;min-height:44px}article{padding:clamp(20px,5vw,42px);border:1px solid #5c593538;border-radius:26px;background:#fff8f0e8;box-shadow:0 18px 50px #56403212}h1,h2{font-family:Romie,Georgia,serif;font-weight:400;line-height:1.1}h1{font-size:clamp(36px,7vw,54px);margin:10px 0 20px;letter-spacing:-.025em}h2{font-size:32px;margin:36px 0 18px}h3{font-size:18px;margin:26px 0 10px}p,li{font-size:16px;line-height:1.6}p{margin:0 0 16px}ul{padding-left:22px}.eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em}.date{font-size:13px}.lead{font-size:18px}hr{border:0;border-top:1px solid #5c593538;margin:36px 0}footer{padding-top:18px;font-size:13px}.note{border-left:3px solid #7442d9;padding-left:16px}
+  </style>
+</head>
+<body>
+  <main>
+    <header><a href="./">PogodaPark</a><nav aria-label="Nawigacja"><a href="./">Do aplikacji</a><a href="./support.html">Pomoc</a></nav></header>
+    <article>
+      <p class="eyebrow">PRYWATNOŚĆ / PRIVACY</p>
+      <h1>Twój plan, pod Twoją kontrolą.</h1>
+      <p class="lead">PogodaPark działa bez konta, reklam i analityki zachowania. Plan zapisuje się na urządzeniu. Dopiero utworzenie krótkiego linku zapisuje jego anonimową wersję w usłudze udostępniania.</p>
+      <p class="date">Obowiązuje od 4 września 2026 r. · <a href="#english" lang="en">English version</a></p>
+
+      <section aria-labelledby="local">
+        <h2 id="local">Dane na urządzeniu</h2>
+        <p>Wpisane nazwy uczestników, przedziały wieku i wzrostu, preferencje, termin wyjazdu, plan oraz oznaczenia odwiedzonych atrakcji są zapisywane lokalnie. Możesz używać umownych nazw, np. „Dorosły 1”. Nie potrzebuję Twojego imienia ani adresu e-mail do przygotowania planu.</p>
+        <p>PogodaPark nie korzysta z HealthKit, kontaktów, identyfikatora reklamowego ani narzędzi śledzących. Wiek i wzrost służą wyłącznie do dopasowania atrakcji do ograniczeń wstępu; aplikacja nie ocenia stanu zdrowia.</p>
+      </section>
+      <section aria-labelledby="location">
+        <h2 id="location">Opcjonalna lokalizacja</h2>
+        <p>Po wybraniu przycisku lokalizacji możesz zezwolić na użycie GPS podczas korzystania z aplikacji. Pozycja służy do pokazania miejsca na mapie, obliczenia odległości i przybliżonego czasu dojścia oraz ponownego ułożenia trasy. Te obliczenia odbywają się na urządzeniu. Nie zapisuję historii GPS ani nie wysyłam pozycji do usługi krótkich linków.</p>
+        <p>Prognoza dotyczy stałego punktu w okolicy Zatora — zapytania pogodowe nie zawierają Twojej lokalizacji. Przyciski Apple Maps i Google Maps otwierają wybraną usługę z miejscem docelowym. Punkt startowy i dalsze przetwarzanie lokalizacji zależą od ustawień tej usługi.</p>
+        <p>Zgodę możesz wycofać w Ustawieniach iPhone’a, w sekcji usług lokalizacji. Planowanie działa także bez GPS. Aplikacja nie śledzi lokalizacji w tle.</p>
+      </section>
+      <section aria-labelledby="sharing">
+        <h2 id="sharing">Krótki link do planu</h2>
+        <p>Gdy wybierzesz kopiowanie lub udostępnienie krótkiego linku, aplikacja wysyła do mojej usługi działającej w Cloudflare uproszczony plan: datę i godziny wizyty, wybrane atrakcje i pokazy, przypisania grup, preferencje oraz rolę i wartości odpowiadające dolnym granicom wybranych przedziałów wieku i wzrostu uczestników.</p>
+        <p>Ten zapis nie zawiera wpisanych nazw, adresu e-mail, pozycji GPS ani identyfikatora urządzenia. Usługa zapisuje plan, losowy token i termin wygaśnięcia. Link działa przez maksymalnie 90 dni; po wygaśnięciu zapis jest automatycznie usuwany. Nie używam tych planów do reklamy, analityki ani profilowania.</p>
+        <p class="note">Każdy, kto otrzyma link, może odczytać plan. Udostępniaj go wybranym osobom. Usunięcie aplikacji nie unieważnia wcześniej utworzonego linku. Aby poprosić o wcześniejsze usunięcie zapisu, prześlij sam link prywatnie na <a href="mailto:mieszko@mahboob.pl">mieszko@mahboob.pl</a>; nie podawaj nazw uczestników.</p>
+      </section>
+      <section aria-labelledby="export">
+        <h2 id="export">PDF i szkic wiadomości</h2>
+        <p>PDF powstaje na urządzeniu i może zawierać wpisane nazwy uczestników oraz ich przedziały wieku i wzrostu. Ty wybierasz, gdzie go zapisać lub komu go wysłać.</p>
+        <p>Pole adresu e-mail jedynie przygotowuje szkic w Twojej aplikacji pocztowej. PogodaPark nie zapisuje adresu i nie wysyła wiadomości za Ciebie. Szkic może zawierać nazwy uczestników. Dalsze przechowywanie wiadomości podlega zasadom wybranej poczty.</p>
+      </section>
+      <section aria-labelledby="network">
+        <h2 id="network">Połączenia z dostawcami danych</h2>
+        <p>Aktualizacje katalogu, kalendarza, pokazów i kolejek są pobierane z GitHub Pages. Dane parku pochodzą z Energylandii, a dane kolejek z Queue-Times. Prognozy i obserwacje są pobierane z Open-Meteo, MET Norway, Bright Sky / DWD, Antistorm oraz ICM / meteo.pl. Zdjęcia atrakcji mogą być pobierane z serwerów Energylandii. Mapa pobiera kafelki OpenStreetMap dla oglądanego fragmentu parku.</p>
+        <p>Przy połączeniu dostawca otrzymuje standardowe dane techniczne, takie jak adres IP, czas i adres żądania oraz informacje o oprogramowaniu potrzebne do obsługi i ochrony usługi. Dostawcy mogą prowadzić własne dzienniki techniczne. Nie dołączam do tych żądań nazw uczestników, adresu e-mail ani historii lokalizacji. Okres przechowywania dzienników dostawcy nie jest tym samym co 90-dniowy termin ważności planu.</p>
+        <p>Zasady dostawców: <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub</a>, <a href="https://www.cloudflare.com/privacypolicy/">Cloudflare</a>, <a href="https://osmfoundation.org/wiki/Privacy_Policy">OpenStreetMap Foundation</a>. Aplikacja pokazuje źródła i czas aktualizacji danych; dostępność połączenia nie oznacza, że informacja z parku jest aktualna.</p>
+      </section>
+      <section aria-labelledby="control">
+        <h2 id="control">Usuwanie danych i kontakt</h2>
+        <p>Usunięcie aplikacji iPhone usuwa jej lokalne dane z urządzenia. W przeglądarce możesz usunąć dane witryny. Wcześniej wyeksportowane PDF-y, wysłane wiadomości, kopie systemowe i krótkie linki wymagają osobnego usunięcia albo wygasają według zasad opisanych powyżej.</p>
+        <p>Twórcą PogodaPark jest Mieszko Mahboob. Pytania, prośby o dostęp do danych lub ich usunięcie kieruj na <a href="mailto:mieszko@mahboob.pl">mieszko@mahboob.pl</a>. Wiadomość oraz adres nadawcy służą obsłudze sprawy i pozostają w korespondencji tak długo, jak jest to potrzebne do jej rozwiązania. Nie wysyłaj informacji o zdrowiu ani dokładnej lokalizacji.</p>
+        <p>PogodaPark to niezależny, nieoficjalny planer wizyty. Nie jest aplikacją operatora Energylandii. Zmiany sposobu przetwarzania danych będą odzwierciedlone na tej stronie.</p>
+      </section>
+
+      <hr>
+      <section id="english" lang="en" aria-labelledby="english-title">
+        <p class="eyebrow">ENGLISH</p>
+        <h2 id="english-title">Privacy Policy</h2>
+        <p class="date">Effective September 4, 2026.</p>
+        <p>PogodaPark requires no account and includes no advertising or behavioural analytics. Participant labels, age and height ranges, preferences, visit dates, the itinerary and completed rides are stored on your device. Use generic labels if you prefer. The app does not use HealthKit, contacts or advertising identifiers.</p>
+        <h3>Optional location</h3>
+        <p>Location permission is requested when you choose the location feature. Your position is used on the device for the map, distances, estimated walking times and route recalculation. The app does not record GPS history, send GPS to the short-link service or track location in the background. Weather requests use fixed coordinates near Zator. Navigation buttons open Apple Maps or Google Maps with the destination; the selected mapping service manages its starting point and location access. You can revoke permission in iPhone Settings and continue planning without GPS.</p>
+        <h3>Optional shared links</h3>
+        <p>Creating or copying a short link uploads an anonymous compact itinerary to the developer’s Cloudflare service. It contains dates, times, ride and show selections, group assignments, preferences and each participant’s role and the lower-bound values of the selected age and height ranges. It does not include participant labels, email, GPS or a device identifier. The service stores the itinerary, a random token and its expiry. Links expire after at most 90 days and expired records are deleted automatically. The data is not used for advertising, analytics or profiling.</p>
+        <p>Anyone with the link can read its itinerary. Deleting the app does not revoke an existing link. For earlier deletion, email only that link privately to <a href="mailto:mieszko@mahboob.pl">mieszko@mahboob.pl</a>; participant names are not required.</p>
+        <h3>Exports and email</h3>
+        <p>PDFs are created on the device and can contain participant labels and age/height ranges. You choose where to save or share them. An email address entered in the app only prepares a draft in your mail app; PogodaPark does not store the address or send the message. The draft may contain participant labels. Your chosen mail or sharing service handles further delivery and storage.</p>
+        <h3>Network services</h3>
+        <p>GitHub Pages serves catalog and calendar updates, shows and Queue-Times snapshots. Weather services include Open-Meteo, MET Norway, Bright Sky / DWD, Antistorm and ICM / meteo.pl. Energylandia may serve attraction photographs, and OpenStreetMap supplies map tiles for the park area being viewed. These providers receive standard connection information such as IP address, request time and address, and software information needed to deliver and secure their services. They may retain technical logs under their own policies. No participant labels, email or GPS history are attached to these requests. Provider log retention is separate from the shared plan’s 90-day expiry.</p>
+        <h3>Control and contact</h3>
+        <p>Deleting the iPhone app removes its local data. In a browser, clear the website’s data. Previously exported files, messages, system backups and shared links are separate copies. For privacy questions, data access or deletion requests, contact the developer, Mieszko Mahboob, at <a href="mailto:mieszko@mahboob.pl">mieszko@mahboob.pl</a>. The sender’s address and message are used to handle the request and kept in correspondence for as long as needed to resolve it. Do not send medical information or precise location.</p>
+        <p>PogodaPark is an independent, unofficial visit planner and is not operated by Energylandia. This page will be updated if data practices change.</p>
+      </section>
+    </article>
+    <footer><span>© 2026 Mieszko Mahboob · PogodaPark</span><a href="./support.html">Pomoc / Support</a></footer>
+  </main>
+</body>
+</html>

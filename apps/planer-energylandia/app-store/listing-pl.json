@@ -1,0 +1,29 @@
+{
+  "locale": "pl",
+  "name": "PogodaPark",
+  "subtitle": "Pogoda i plan Energylandii",
+  "promotionalText": "Zaplanuj wizytę w Energylandii dla swojej grupy: sprawdź pogodę, dobierz atrakcje do wieku i wzrostu, wymieniaj przystanki i zachowaj trasę w PDF.",
+  "description": "Jeden plan dla całej grupy — od wyboru dnia po ostatnią atrakcję.\n\nPogodaPark pomaga przygotować wizytę w Energylandii. Sprawdź prognozę na najbliższe dni lub od razu ułóż trasę dopasowaną do uczestników, dostępnego czasu i upodobań.\n\nPLAN DLA TWOJEJ GRUPY\nDodaj dorosłych i dzieci, wybierz przedziały wieku i wzrostu, tempo oraz ulubione rodzaje atrakcji. Plan uwzględnia ograniczenia wstępu, przerwę na posiłek i czas dojścia. Podział na mniejsze grupy jest opcjonalny.\n\nWYGODNIE W PARKU\nZobacz ponumerowane przystanki na mapie, otwórz szczegóły atrakcji i nawigację. Oznacz odwiedzone miejsca lub wymień atrakcję na inną odpowiednią dla grupy. Po udostępnieniu lokalizacji zobaczysz orientacyjne odległości i czas pieszo.\n\nPOGODA, KOLEJKI I POKAZY\nKorzystaj z prognoz, dostępnych danych o kolejkach oraz oficjalnego kalendarza godzin i pokazów. Źródła i czas aktualizacji pomagają ocenić ich wiarygodność. Nieaktualne lub niedostępne informacje są wyraźnie oznaczone.\n\nPLAN DO ZACHOWANIA\nPrzygotuj graficzny PDF lub podziel się krótkim linkiem. Zapisany plan pozostaje na urządzeniu; aktualne dane, zdjęcia, mapa i udostępnianie mogą wymagać internetu.\n\nBEZ KONTA, REKLAM I ANALITYKI ZACHOWANIA\nPlanowanie odbywa się na urządzeniu. GPS jest opcjonalny. Krótki link zapisuje anonimowy plan bez nazw, e-maila i GPS, z przedziałami wieku i wzrostu potrzebnymi do odtworzenia trasy, na maksymalnie 90 dni.\n\nPogodaPark jest niezależną, nieoficjalną aplikacją i nie jest powiązany z operatorem Energylandii. Czasy oczekiwania i dojścia są orientacyjne. Zasady atrakcji, aktualne komunikaty i decyzje obsługi mają pierwszeństwo. Aplikacja nie wysyła ostrzeżeń pogodowych w tle.",
+  "keywords": "Energylandia,planer,pogoda,atrakcje,kolejki,Zator,rodzina,wycieczka,park,mapa,pokazy",
+  "supportUrl": "https://jakiesluchawki.github.io/zabhop/planer-energylandia/support.html",
+  "marketingUrl": "https://jakiesluchawki.github.io/zabhop/planer-energylandia/",
+  "privacyPolicyUrl": "https://jakiesluchawki.github.io/zabhop/planer-energylandia/privacy.html",
+  "privacyChoicesUrl": "https://jakiesluchawki.github.io/zabhop/planer-energylandia/privacy.html#control",
+  "copyright": "2026 Mieszko Mahboob",
+  "primaryCategory": "TRAVEL",
+  "secondaryCategory": "WEATHER",
+  "reviewNotes": "PogodaPark is an independent, unofficial trip planner for Energylandia in Zator, Poland. It is not the park operator's app and does not sell tickets. No login, test account, purchase or subscription is required. The UI is in Polish.\n\nReview flow: choose 'Ułóż plan' (Create a plan), add an adult and child using the age/height range controls, keep the group together and finish onboarding. The itinerary includes rides, a meal break, a numbered map and completed-state tracking. The circular-arrow control replaces a ride with a suitable alternative. Location is optional and requested only through the location button in the itinerary; planning can be reviewed outside Poland without granting it. Distances and walking times are estimates.\n\n'Przygotuj piękny PDF' exports an itinerary through the native iOS share panel. Link sharing also uses the native panel and opens the public web planner for recipients. The local app and saved itinerary remain usable offline; fresh weather, live queues, external photographs, map tiles and short-link creation/first retrieval need internet. Old or missing data is explicitly labelled and must not be interpreted as current. The app does not provide background weather notifications.\n\nWeather forecasts are for a fixed location near the park, not the user's GPS. Live queues, official opening hours and shows are optional context. Shows enter a plan only after the user opts in and current data supports it. Choose another date if the official calendar marks the selected date closed. During seasonal closure the saved catalog and plan controls remain accessible but cannot establish park availability.\n\nThe optional short-link feature stores an anonymous compact itinerary for up to 90 days: dates, times, ride selections, group role and age/height range lower bounds, and preferences. It excludes participant labels, email, GPS and device identifiers. Anyone with the opaque link can read it. No ads, behavioural analytics, tracking or HealthKit are used. Privacy and support pages are linked inside the app and are publicly accessible at the supplied URLs.",
+  "reviewContact": {
+    "firstName": "Mieszko",
+    "lastName": "Mahboob",
+    "email": "mieszko@mahboob.pl"
+  },
+  "submissionNotes": {
+    "version": "1.0",
+    "requiresLogin": false,
+    "priceIntent": "Free; confirm against the app record before submission.",
+    "ageRatingIntent": "General-audience travel utility, not Kids Category; complete the current questionnaire from actual content.",
+    "contentRights": "Do not assert ownership or permission for third-party photos, fonts or descriptions without evidence; see review-readiness.md.",
+    "reviewPhone": "Use the verified App Store Connect account contact phone; not stored in this public repository."
+  }
+}

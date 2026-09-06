@@ -12,6 +12,25 @@ export const TRACKING_LOCATION_OPTIONS = Object.freeze({
   timeout: 25_000,
 });
 
+// Keep user intent even if the first asynchronous fix arrives after pausing.
+export function createLocationRequestState(initiallyActive = true) {
+  let active = initiallyActive;
+  let requested = false;
+  let generation = 0;
+  return {
+    begin() { requested = true; return ++generation; },
+    accepts(request) { return active && requested && request === generation; },
+    setActive(value) {
+      const next = Boolean(value);
+      if (next === active) return false;
+      active = next;
+      if (!active) { generation += 1; return false; }
+      return requested;
+    },
+    cancel() { requested = false; generation += 1; },
+  };
+}
+
 function finite(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;

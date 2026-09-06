@@ -15,6 +15,23 @@ function fakeStorage() {
   };
 }
 
+test("bundled native application never fetches or reloads a web code release", async () => {
+  const result = await checkForAppUpdate({
+    native: true,
+    release: "0123456789ab",
+    locationRef: { href: "capacitor://localhost/", replace: () => assert.fail("native code cannot reload from Pages") },
+    fetchImpl: async () => assert.fail("native code must not check web releases"),
+  });
+  assert.deepEqual(result, { state: "disabled", release: "0123456789ab" });
+  const cleanup = startAppUpdateChecks({
+    native: true,
+    release: "0123456789ab",
+    windowRef: { setInterval: () => assert.fail("native must not poll web code releases") },
+    documentRef: {},
+  });
+  cleanup();
+});
+
 test("identyfikator wydania przyjmuje wyłącznie prawdziwy hash Git", () => {
   assert.equal(normalizedRelease("ABCDEF1234567890"), "abcdef123456");
   assert.equal(normalizedRelease("dev"), null);

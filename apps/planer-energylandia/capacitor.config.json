@@ -1,0 +1,25 @@
+{
+  "appId": "pl.mieszkomahboob.pogodapark",
+  "appName": "PogodaPark",
+  "webDir": "dist",
+  "backgroundColor": "#fff8f0",
+  "appendUserAgent": "PogodaPark/1.0 (+https://jakiesluchawki.github.io/zabhop/planer-energylandia/)",
+  "ios": {
+    "backgroundColor": "#fff8f0",
+    "contentInset": "never",
+    "preferredContentMode": "mobile",
+    "scrollEnabled": true,
+    "allowsLinkPreview": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": false },
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "launchShowDuration": 300,
+      "launchFadeOutDuration": 200,
+      "backgroundColor": "#fff8f0",
+      "showSpinner": false
+    },
+    "StatusBar": { "overlaysWebView": true, "style": "DARK" }
+  }
+}

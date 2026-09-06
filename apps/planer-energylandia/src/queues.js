@@ -1,3 +1,5 @@
+import { loadLiveSnapshot } from "./native.js";
+
 const QUEUE_SOURCE_URL = "https://queue-times.com/en-US/parks/317/queue_times";
 const QUEUE_STALE_AFTER_MINUTES = 90;
 
@@ -140,12 +142,12 @@ export function normalizeQueueSnapshot(payload, {
 }
 
 export async function loadQueueTimes(signal) {
-  const url = import.meta.env.DEV
-    ? "/api/queues"
-    : `${import.meta.env.BASE_URL}live-queues.json`;
-  const response = await fetch(url, { signal, cache: "no-store" });
-  if (!response.ok) throw new Error(`Kolejki: HTTP ${response.status}`);
-  return normalizeQueueSnapshot(await response.json());
+  if (import.meta.env?.DEV) {
+    const response = await fetch("/api/queues", { signal, cache: "no-store" });
+    if (!response.ok) throw new Error(`Kolejki: HTTP ${response.status}`);
+    return normalizeQueueSnapshot(await response.json());
+  }
+  return normalizeQueueSnapshot(await loadLiveSnapshot("live-queues.json", { signal }));
 }
 
 export function queueForAttraction(attraction, queues) {

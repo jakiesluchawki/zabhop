@@ -73,6 +73,17 @@ test("plan przechodzi bezpieczny round-trip przez link", () => {
   assert.deepEqual(decoded.days.map((day) => day.steps.map((step) => step.id)), plan.days.map((day) => day.steps.map((step) => step.id)));
 });
 
+test("links produced from an iOS bundle open the public app and preserve the itinerary", () => {
+  const plan = buildUniversalPlan(profile);
+  const url = createPlanUrl(plan, "capacitor://localhost/index.html", "abcdef123456");
+  assert.ok(url.startsWith("https://jakiesluchawki.github.io/zabhop/planer-energylandia/?rabcdef123456#plan="));
+  const decoded = decodePlan(new URL(url).hash.slice("#plan=".length));
+  assert.equal(decoded.days.length, plan.days.length);
+  assert.equal(decoded.safety.valid, true);
+  assert.equal(createShortPlanUrl("AbCdEfGhIjKlMn_o", "capacitor://localhost/", "abcdef123456"),
+    "https://jakiesluchawki.github.io/zabhop/planer-energylandia/?rabcdef123456#p/AbCdEfGhIjKlMn_o");
+});
+
 test("round-trip planu 1–3 dni zachowuje cały dzień oraz opcje zapasowe", () => {
   for (const dayCount of [1, 2, 3]) {
     const plan = buildUniversalPlan({ ...profile, dayCount });

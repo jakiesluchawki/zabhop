@@ -1,4 +1,5 @@
 import { parkCalendarFreshness, parkDayForDate } from "./parkCalendar.js";
+import { loadLiveSnapshot } from "./native.js";
 
 const OFFICIAL_SHOW_INDEX = "https://energylandia.pl/show/";
 // GitHub Pages republishes the official snapshot on a best-effort schedule. In
@@ -187,9 +188,7 @@ function normaliseShow(raw) {
 }
 
 export async function loadShowSchedule(signal) {
-  const response = await fetch(`${import.meta.env.BASE_URL}live-shows.json`, { signal, cache: "no-store" });
-  if (!response.ok) throw new Error(`Pokazy: HTTP ${response.status}`);
-  const payload = await response.json();
+  const payload = await loadLiveSnapshot("live-shows.json", { signal });
   const checkedAt = Number.isFinite(Date.parse(payload?.source?.checkedAt))
     ? new Date(payload.source.checkedAt).toISOString()
     : null;
