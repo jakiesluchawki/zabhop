@@ -16,8 +16,9 @@ const minimumStoreCount = 10_000;
 const maximumShrinkRatio = 0.1;
 const minimumKnownHoursRatio = 0.75;
 const minimumChainRetentionRatio = 0.7;
-const primaryRequestTimeoutMs = 75_000;
-const backupRequestTimeoutMs = 25_000;
+const overpassQueryTimeoutSeconds = 60;
+// Every provider needs time to finish the query and transfer its response.
+const requestTimeoutMs = (overpassQueryTimeoutSeconds + 15) * 1_000;
 const maximumPrimaryRateLimitRetries = 2;
 const defaultRateLimitRetryDelayMs = 7_000;
 const minimumRateLimitRetryDelayMs = 5_000;
@@ -64,20 +65,25 @@ export const overpassChainBatches = [
 ];
 
 export function buildOverpassQuery(batch) {
+  // Select exact indexed tags in a generous bounding box first. Repeating the
+  // country-area filter for every name/brand alias makes SPAR's query expensive.
+  // Keep the exact Poland boundary check, but apply it once to the candidate set.
+  const candidateBounds = "48,13,56,25";
   const values = [...new Set(batch.values)];
   const statements = values.flatMap((value) => {
     const safe = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     return [
-      `  nwr["shop"]["brand"="${safe}"](area.poland);`,
-      `  nwr["shop"]["name"="${safe}"](area.poland);`
+      `  nwr["shop"]["brand"="${safe}"](${candidateBounds});`,
+      `  nwr["shop"]["name"="${safe}"](${candidateBounds});`
     ];
   });
 
-  return `[out:json][timeout:60];
+  return `[out:json][timeout:${overpassQueryTimeoutSeconds}];
 area["ISO3166-1"="PL"]["admin_level"="2"]->.poland;
 (
 ${statements.join("\n")}
-);
+)->.candidates;
+nwr.candidates(area.poland);
 out center;
 `;
 }
@@ -381,7 +387,6 @@ export async function fetchChainBatch(batch, position, total, options = {}) {
   for (let round = 0; round < retryRounds; round += 1) {
     for (const [endpointIndex, endpoint] of endpoints.entries()) {
       const host = new URL(endpoint).host;
-      const timeoutMs = endpointIndex === 0 ? primaryRequestTimeoutMs : backupRequestTimeoutMs;
       const maximumAttempts = endpointIndex === 0 ? maximumPrimaryRateLimitRetries + 1 : 1;
 
       for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
@@ -395,7 +400,7 @@ export async function fetchChainBatch(batch, position, total, options = {}) {
               "User-Agent": "ZabHop weekly catalog refresh (https://github.com/jakiesluchawki/zabhop)"
             },
             body: new URLSearchParams({ data: buildOverpassQuery(batch) }),
-            signal: AbortSignal.timeout(timeoutMs)
+            signal: AbortSignal.timeout(requestTimeoutMs)
           });
           if (!response.ok) {
             const shouldRetryHere = endpointIndex === 0

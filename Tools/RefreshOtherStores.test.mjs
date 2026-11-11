@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildOverpassQuery,
@@ -56,6 +61,125 @@ test("queries each store chain using exact indexed OSM tags instead of global re
   assert.doesNotMatch(query, /\["(?:brand|name|operator)"~/);
   assert.doesNotMatch(query, /Biedronka|Carrefour|Stokrotka/);
   assert.equal(overpassChainBatches.length, 12);
+});
+
+test("filters Poland once after bounded indexed lookups, including every SPAR alias", () => {
+  for (const batch of overpassChainBatches) {
+    const query = buildOverpassQuery(batch);
+    assert.match(query, /area\["ISO3166-1"="PL"\]\["admin_level"="2"\]->\.poland;/);
+    assert.equal(query.match(/\(area\.poland\)/g)?.length, 1);
+    assert.match(query, /\)->\.candidates;\nnwr\.candidates\(area\.poland\);\nout center;/);
+    const statements = query.split("\n").filter((line) => line.startsWith("  nwr"));
+    assert.equal(statements.length, new Set(batch.values).size * 2);
+    for (const value of batch.values) {
+      for (const tag of ["brand", "name"]) {
+        assert.ok(statements.includes(`  nwr["shop"]["${tag}"="${value}"](48,13,56,25);`));
+      }
+    }
+  }
+});
+
+test("escapes and deduplicates exact values without changing query structure", () => {
+  const query = buildOverpassQuery({ values: ['A "quoted" \\ shop', 'A "quoted" \\ shop'] });
+  assert.equal(query.split("\n").filter((line) => line.startsWith("  nwr")).length, 2);
+  assert.ok(query.includes('["brand"="A \\"quoted\\" \\\\ shop"]'));
+});
+
+test("gives backup providers the full server timeout plus response-transfer time", async (t) => {
+  const timeouts = [];
+  const requests = [];
+  t.mock.method(AbortSignal, "timeout", (milliseconds) => {
+    timeouts.push(milliseconds);
+    return new AbortController().signal;
+  });
+  const endpoints = ["https://primary.example/api/interpreter", "https://backup.example/api/interpreter"];
+  const result = await fetchChainBatch(overpassChainBatches[3], 4, 12, {
+    endpoints,
+    fetchImplementation: async (endpoint, request) => {
+      requests.push(request);
+      if (endpoint === endpoints[0]) throw new DOMException("Timed out", "TimeoutError");
+      return Response.json({ elements: [element(1, { name: "SPAR" })] });
+    },
+    pause: async () => {}
+  });
+
+  assert.equal(result.source, endpoints[1]);
+  assert.deepEqual(timeouts, [75_000, 75_000]);
+  for (const request of requests) {
+    assert.equal(request.method, "POST");
+    assert.match(request.body.get("data"), /\[timeout:60\]/);
+    assert.ok(request.signal instanceof AbortSignal);
+  }
+});
+
+test("rejects incomplete, malformed and empty success responses before falling back", async () => {
+  const endpoints = ["https://primary.example/api/interpreter", "https://backup.example/api/interpreter"];
+  for (const invalid of [
+    { elements: [element(1)], remark: "runtime error: Query timed out" },
+    { elements: [] },
+    { error: "missing elements" }
+  ]) {
+    const calls = [];
+    const result = await fetchChainBatch(overpassChainBatches[3], 4, 12, {
+      endpoints,
+      fetchImplementation: async (endpoint) => {
+        calls.push(endpoint);
+        return Response.json(endpoint === endpoints[0] ? invalid : { elements: [element(2)] });
+      },
+      pause: async () => {}
+    });
+    assert.deepEqual(calls, endpoints);
+    assert.equal(result.source, endpoints[1]);
+    assert.equal(result.snapshot.elements[0].id, 2);
+  }
+});
+
+test("fails after bounded timeout retries instead of publishing an incomplete chain", async () => {
+  const endpoints = ["https://primary.example/api/interpreter", "https://backup.example/api/interpreter"];
+  const calls = [];
+  const pauses = [];
+  await assert.rejects(fetchChainBatch(overpassChainBatches[3], 4, 12, {
+    endpoints,
+    fetchImplementation: async (endpoint) => {
+      calls.push(endpoint);
+      throw new DOMException("Timed out", "TimeoutError");
+    },
+    pause: async (delay) => pauses.push(delay)
+  }), /Every Overpass provider failed for SPAR/);
+  assert.deepEqual(calls, [...endpoints, ...endpoints]);
+  assert.deepEqual(pauses, [3_000]);
+});
+
+test("a partial timeout response cannot overwrite either catalog or its manifest", (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "zabhop-other-stores-"));
+  t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
+  const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  fs.mkdirSync(path.join(temporaryRoot, "Tools"));
+  fs.mkdirSync(path.join(temporaryRoot, "ZabHop", "Resources"), { recursive: true });
+  for (const file of ["Tools/RefreshOtherStores.mjs", "store-hours.js"]) {
+    fs.copyFileSync(path.join(root, file), path.join(temporaryRoot, file));
+  }
+  const originalFiles = new Map([
+    ["other-stores.json", '[{"id":"original-public"}]'],
+    ["ZabHop/Resources/other-stores.json", '[{"id":"original-bundled"}]'],
+    ["other-stores-manifest.json", '{"sha256":"original-manifest"}']
+  ]);
+  for (const [file, data] of originalFiles) fs.writeFileSync(path.join(temporaryRoot, file), data);
+  const input = path.join(temporaryRoot, "partial.json");
+  fs.writeFileSync(input, JSON.stringify({ ...snapshotWith(), remark: "runtime error: Query timed out" }));
+
+  const result = spawnSync(process.execPath, ["Tools/RefreshOtherStores.mjs"], {
+    cwd: temporaryRoot,
+    env: { ...process.env, ZABHOP_OVERPASS_INPUT: input },
+    encoding: "utf8",
+    timeout: 10_000
+  });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /incomplete response/);
+  for (const [file, data] of originalFiles) {
+    assert.equal(fs.readFileSync(path.join(temporaryRoot, file), "utf8"), data);
+  }
 });
 
 test("honors safe Retry-After delays without busy loops or unbounded waits", () => {
