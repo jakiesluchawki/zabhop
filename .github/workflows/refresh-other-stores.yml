@@ -1,6 +1,12 @@
 name: Refresh other store catalog
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Tools/RefreshOtherStores.mjs"
+      - ".github/workflows/refresh-other-stores.yml"
   schedule:
     - cron: "43 2 * * 3"
   workflow_dispatch:
@@ -23,6 +29,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Verify catalog recovery safeguards
+        run: node --test Tools/RefreshOtherStores.test.mjs
       - name: Fetch and validate current OpenStreetMap stores
         run: node Tools/RefreshOtherStores.mjs
       - name: Verify the public manifest and bundled iOS catalog

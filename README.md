@@ -17,7 +17,9 @@ Aplikacja zaczyna pracę natychmiast na lokalnym katalogu. Aktualizacje odczytuj
 
 Manifesty wskazują odpowiednio sąsiednie `stores.json` i `other-stores.json`. Zawierają wersję schematu, datę aktualizacji, liczbę sklepów i sumę SHA-256. Pełna baza jest pobierana tylko po zmianie sumy kontrolnej; przed instalacją sprawdzane są jej zawartość, liczba rekordów i integralność. Ostatnia poprawna lub wbudowana baza pozostaje dostępna bez internetu.
 
-Workflow `Refresh Żabka catalog` pobiera oficjalny lokalizator każdego dnia, z drugą poranną próbą na wypadek chwilowej niedostępności źródła. Workflow `Refresh other store catalog` odświeża raz w tygodniu dane OpenStreetMap dla sieci ALDI, Auchan, Biedronka, Carrefour, Delikatesy Centrum, Dino, Kaufland, Lewiatan, Lidl, Netto, SPAR i Stokrotka.
+Workflow `Refresh Żabka catalog` pobiera oficjalny lokalizator każdego dnia, z drugą poranną próbą na wypadek chwilowej niedostępności źródła. Workflow `Refresh other store catalog` odświeża raz w tygodniu dane OpenStreetMap dla sieci ALDI, Auchan, Biedronka, Carrefour, Delikatesy Centrum, Dino, Kaufland, Lewiatan, Lidl, Netto, SPAR i Stokrotka. Uruchamia się również po zmianie importera lub jego workflow na gałęzi `main`; najpierw sprawdza testy zabezpieczeń. Zmiana samych plików katalogu nie uruchamia kolejnego odświeżenia.
+
+Import innych sklepów wyszukuje dokładne warianty nazw i marek w prostokącie obejmującym Polskę, a następnie jednokrotnie sprawdza granicę kraju dla całej partii. Unika w ten sposób wielokrotnego kosztownego filtrowania granic dla sieci z wieloma nazwami, takich jak SPAR. Każdy serwer Overpass, także zapasowy, otrzymuje 75 sekund na odpowiedź na zapytanie z limitem pracy 60 sekund. Niekompletne odpowiedzi, w tym HTTP 200 z informacją o przekroczeniu czasu, są odrzucane. Po wyczerpaniu prób ostatni poprawny katalog pozostaje bez zmian.
 
 Oba procesy aktualizują jednocześnie katalog publiczny, manifest oraz bazę dołączaną do aplikacji iPhone. Odrzucają podejrzanie małe wyniki, utratę znacznej części sklepów i nieprawidłowe sumy kontrolne. Import OSM pomija sklepy zamknięte, planowane i niedostępne; deklarację „24/7” uznaje tylko po udokumentowanej aktualnej weryfikacji. Niepotwierdzone godziny są wyraźnie oznaczane.
 
@@ -30,6 +32,12 @@ node Tools/ValidateCatalogs.mjs
 node Tools/RefreshZabkaCatalog.mjs
 node Tools/RefreshOtherStores.mjs
 node --test tests/*.test.cjs Tools/*.test.mjs
+```
+
+Sprawdzenie samego pobierania SPAR, bez zapisywania katalogów:
+
+```sh
+node Tools/RefreshOtherStores.mjs --probe-chain SPAR
 ```
 
 ## Aplikacja WWW
